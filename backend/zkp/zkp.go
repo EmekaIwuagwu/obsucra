@@ -7,6 +7,7 @@ import (
 
 	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark/backend/groth16"
+	gnarkproof "github.com/consensys/gnark/backend/groth16/bn254"
 	"github.com/consensys/gnark/constraint"
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/frontend/cs/r1cs"
@@ -89,8 +90,28 @@ func GenerateProof(value, min, max *big.Int) (groth16.Proof, error) {
 		return nil, err
 	}
 
-	fmt.Println("ZKP Proof generated successfully for value in range.")
 	return proof, nil
+}
+
+// SerializeProof converts a Groth16 proof to [8]*big.Int for Solidity
+func SerializeProof(proof groth16.Proof) ([8]*big.Int, error) {
+	var res [8]*big.Int
+	
+	_proof, ok := proof.(*gnarkproof.Proof)
+	if !ok {
+		return res, fmt.Errorf("unsupported proof type")
+	}
+
+	res[0] = _proof.Ar.X.BigInt(new(big.Int))
+	res[1] = _proof.Ar.Y.BigInt(new(big.Int))
+	res[2] = _proof.Bs.X.A1.BigInt(new(big.Int))
+	res[3] = _proof.Bs.X.A0.BigInt(new(big.Int))
+	res[4] = _proof.Bs.Y.A1.BigInt(new(big.Int))
+	res[5] = _proof.Bs.Y.A0.BigInt(new(big.Int))
+	res[6] = _proof.Krs.X.BigInt(new(big.Int))
+	res[7] = _proof.Krs.Y.BigInt(new(big.Int))
+
+	return res, nil
 }
 
 func ExportSolidityVerifier(outputPath string) error {

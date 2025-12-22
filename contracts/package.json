@@ -1,7 +1,6 @@
 {
   "name": "obscura-contracts",
   "version": "1.0.0",
-  "type": "module",
   "description": "Smart Contracts for the Obscura Privacy Oracle Mesh",
   "main": "index.js",
   "scripts": {
@@ -11,6 +10,7 @@
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "dotenv": "^17.2.3",
     "ethers": "^6.16.0",
     "hardhat": "^2.22.0"
   },

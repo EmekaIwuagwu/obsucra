@@ -1,10 +1,7 @@
 package main
 
 import (
-	"context"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/joho/godotenv"
 	"github.com/obscura-network/obscura-node/node"

@@ -85,7 +85,18 @@ func (fs *FileStore) flush() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(fs.filename, data, 0644)
+	
+	tempFile := fs.filename + ".tmp"
+	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+		return err
+	}
+	
+	// Finalize move
+	if err := os.Rename(tempFile, fs.filename); err != nil {
+		os.Remove(tempFile) // Cleanup
+		return err
+	}
+	return nil
 }
 
 func (fs *FileStore) Close() error {

@@ -2,73 +2,139 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/rs/zerolog/log"
 )
 
 // EventListener monitors the blockchain for Oracle events
 type EventListener struct {
-	JobManager *JobManager
+	JobManager  *JobManager
 	RPCEndpoint string
+	ContractAddr common.Address
+	client      *ethclient.Client
+	oracleABI   abi.ABI
 }
+
+// Hardcoded ABI for Event Parsing (Partial)
+const OracleEventABI = `[{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"requestId","type":"uint256"},{"indexed":false,"internalType":"string","name":"apiUrl","type":"string"},{"indexed":false,"internalType":"uint256","name":"min","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"max","type":"uint256"},{"indexed":true,"internalType":"address","name":"requester","type":"address"}],"name":"RequestData","type":"event"}]`
 
 // NewEventListener creates a new listener
-func NewEventListener(jm *JobManager, rpc string) *EventListener {
-	return &EventListener{
-		JobManager: jm,
-		RPCEndpoint: rpc,
+func NewEventListener(jm *JobManager, rpc string, contractAddr string) (*EventListener, error) {
+	parsedABI, err := abi.JSON(strings.NewReader(OracleEventABI))
+	if err != nil {
+		return nil, err
 	}
+	
+	return &EventListener{
+		JobManager:   jm,
+		RPCEndpoint:  rpc,
+		ContractAddr: common.HexToAddress(contractAddr),
+		oracleABI:    parsedABI,
+	}, nil
 }
 
-// Start begins polling for events (Mock implementation for prototype)
-// In production: Use ethclient.SubscribeFilterLogs
+// Start begins subscribing to blockchain events with automatic reconnection
 func (el *EventListener) Start(ctx context.Context) {
-	log.Info().Msg("Blockchain Event Listener Started")
-
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
 	for {
+		err := el.connectAndListen(ctx)
+		if err != nil {
+			log.Error().Err(err).Msg("EventListener error, reconnecting in 10s...")
+		}
+		
 		select {
 		case <-ctx.Done():
-			log.Info().Msg("Event Listener stopping")
 			return
-		case <-ticker.C:
-			el.pollEvents()
+		case <-time.After(10 * time.Second):
+			continue
 		}
 	}
 }
 
-func (el *EventListener) pollEvents() {
-	// MOCK: Simulate catching an event periodically
-	// In real impl: fetch logs from eth_getLogs
-	
-	// Simulate Data Request
-	// log.Debug().Msg("Polling for new events...")
-	
-	// Occasionally generate a mock job for demonstration if queue is empty
-	// This keeps the dashboard "alive" during demos
-	/*
-	jobID := fmt.Sprintf("req-%d", time.Now().Unix())
-	el.JobManager.SubmitJob(JobRequest{
-		ID: jobID,
-		Type: JobTypeDataFeed,
-		Params: map[string]interface{}{"pair": "ETH/USD"},
-		Requester: "0xMockRequester",
-		Timestamp: time.Now(),
-	})
-	*/
+func (el *EventListener) connectAndListen(ctx context.Context) error {
+	log.Debug().Str("rpc", el.RPCEndpoint).Msg("Connecting to Blockchain...")
+
+	client, err := ethclient.Dial(el.RPCEndpoint)
+	if err != nil {
+		return fmt.Errorf("failed to dial: %w", err)
+	}
+	defer client.Close()
+	el.client = client
+
+	query := ethereum.FilterQuery{
+		Addresses: []common.Address{el.ContractAddr},
+	}
+
+	logs := make(chan types.Log)
+	sub, err := client.SubscribeFilterLogs(ctx, query, logs)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe: %w", err)
+	}
+	defer sub.Unsubscribe()
+
+	log.Info().Msg("Event subscription active")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case err := <-sub.Err():
+			return fmt.Errorf("subscription interrupted: %w", err)
+		case vLog := <-logs:
+			el.handleLog(vLog)
+		}
+	}
 }
 
-// MockEventTrigger is used by tests/demo scripts to manually invoke the listener
-func (el *EventListener) MockEventTrigger(jobType JobType, params map[string]interface{}) {
-	el.JobManager.SubmitJob(JobRequest{
-		ID:        "mock-" + big.NewInt(time.Now().UnixNano()).String(),
-		Type:      jobType,
-		Params:    params,
-		Requester: "0x0000000000000000000000000000000000000000",
-		Timestamp: time.Now(),
-	})
+func (el *EventListener) handleLog(vLog types.Log) {
+	event, err := el.oracleABI.EventByID(vLog.Topics[0])
+	if err != nil {
+		return // Not our event
+	}
+
+	if event.Name == "RequestData" {
+		// Parse Data
+		// Indexed fields (topics): [0]Sig, [1]requestId, [2]requester
+		requestId := new(big.Int).SetBytes(vLog.Topics[1].Bytes())
+		requester := common.BytesToAddress(vLog.Topics[2].Bytes())
+
+		// Non-indexed fields (data)
+		var data struct {
+			ApiUrl string
+			Min    *big.Int
+			Max    *big.Int
+		}
+		
+		err := el.oracleABI.UnpackIntoInterface(&data, "RequestData", vLog.Data)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to unpack RequestData event")
+			return
+		}
+
+		log.Info().
+			Str("req_id", requestId.String()).
+			Str("url", data.ApiUrl).
+			Msg("Oracle Request Detected")
+
+		// Dispatch Job
+		el.JobManager.SubmitJob(JobRequest{
+			ID:        requestId.String(),
+			Type:      JobTypeDataFeed,
+			Params:    map[string]interface{}{
+				"url": data.ApiUrl,
+				"min": data.Min,
+				"max": data.Max,
+			},
+			Requester: requester.Hex(),
+			Timestamp: time.Now(),
+		})
+	}
 }

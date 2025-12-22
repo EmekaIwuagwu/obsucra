@@ -4,8 +4,8 @@ import (
 	"sort"
 )
 
-// CalculateMedian returns the median of a slice of float64 values.
-func CalculateMedian(values []float64) float64 {
+// AggregateMedian returns the median of a slice of float64 values.
+func AggregateMedian(values []float64) float64 {
 	if len(values) == 0 {
 		return 0
 	}

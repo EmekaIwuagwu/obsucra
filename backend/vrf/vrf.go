@@ -2,12 +2,10 @@ package vrf
 
 import (
 	"crypto/ecdsa"
-	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"math/big"
 	"sync"
-	"time"
 
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/rs/zerolog/log"

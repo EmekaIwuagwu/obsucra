@@ -5,21 +5,21 @@ import (
 )
 
 func TestMedianAggregation(t *testing.T) {
-	values := []uint64{100, 200, 300, 400, 500}
-	expected := uint64(300)
+	values := []float64{100, 200, 300, 400, 500}
+	expected := float64(300)
 	result := AggregateMedian(values)
 
 	if result != expected {
-		t.Errorf("Expected %d, got %d", expected, result)
+		t.Errorf("Expected %f, got %f", expected, result)
 	}
 }
 
 func TestMedianAggregationEven(t *testing.T) {
-	values := []uint64{100, 200, 300, 400}
-	expected := uint64(250) // (200 + 300) / 2
+	values := []float64{100, 200, 300, 400}
+	expected := float64(250) // (200 + 300) / 2
 	result := AggregateMedian(values)
 
 	if result != expected {
-		t.Errorf("Expected %d, got %d", expected, result)
+		t.Errorf("Expected %f, got %f", expected, result)
 	}
 }

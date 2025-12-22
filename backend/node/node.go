@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
@@ -59,6 +60,8 @@ func NewNode() (*Node, error) {
 	viper.SetDefault("log_level", "info")
 	viper.SetDefault("telemetry_mode", true)
 	viper.SetDefault("db_path", "./node.db.json")
+	viper.SetDefault("oracle_contract_address", "0x0000000000000000000000000000000000000000")
+	viper.SetDefault("private_key", "0000000000000000000000000000000000000000000000000000000000000000") // DUMMY
 
 	if err := viper.ReadInConfig(); err != nil {
 		logger.Warn().Err(err).Msg("Config file not found, using defaults/environment variables")
@@ -80,12 +83,32 @@ func NewNode() (*Node, error) {
 		return nil, fmt.Errorf("failed to init storage: %w", err)
 	}
 
+	// Connect to Eth Client early for JobManager
+	client, err := ethclient.Dial(cfg.EthereumURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial ethereum: %w", err)
+	}
+
 	// Initialize Components
-	jobMgr := NewJobManager()
-	aiModel := ai.NewPredictiveModel()
 	adapterMgr := adapters.NewAdapterManager()
+	
+	jobMgr, err := NewJobManager(
+		adapterMgr, 
+		client, 
+		viper.GetString("private_key"), 
+		viper.GetString("oracle_contract_address"),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init job manager: %w", err)
+	}
+
+	aiModel := ai.NewPredictiveModel()
 	secMgr := security.NewReputationManager()
-	listener := NewEventListener(jobMgr, cfg.EthereumURL)
+	
+	listener, err := NewEventListener(jobMgr, cfg.EthereumURL, viper.GetString("oracle_contract_address"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to init event listener: %w", err)
+	}
 
 	return &Node{
 		Config:     cfg,

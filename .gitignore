@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+backend/vendor/
+
+# Hardhat/Foundry
+artifacts/
+cache/
+typechain/
+typechain-types/
+
+# Backend
+backend/obscura-node
+backend/*.tmp
+backend/node.db.json
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db

@@ -2,7 +2,6 @@ package security
 
 import (
 	"sync"
-	"time"
 
 	"github.com/rs/zerolog/log"
 )

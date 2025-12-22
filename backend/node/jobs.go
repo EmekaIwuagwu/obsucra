@@ -2,12 +2,22 @@ package node
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"fmt"
 	"math/big"
-	"sort"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/rs/zerolog/log"
+
+	"github.com/obscura-network/obscura-node/adapters"
+	"github.com/obscura-network/obscura-node/zkp"
 )
 
 // JobType defines the type of oracle job
@@ -16,8 +26,6 @@ type JobType string
 const (
 	JobTypeDataFeed  JobType = "DATA_FEED"
 	JobTypeVRF       JobType = "VRF"
-	JobTypeCompute   JobType = "COMPUTE"
-	JobTypePredicate JobType = "PREDICATE"
 )
 
 // JobRequest represents an incoming oracle request
@@ -31,15 +39,37 @@ type JobRequest struct {
 
 // JobManager handles the lifecycle of jobs
 type JobManager struct {
-	jobQueue chan JobRequest
-	mu       sync.RWMutex
+	jobQueue    chan JobRequest
+	mu          sync.RWMutex
+	adapters    *adapters.AdapterManager
+	client      *ethclient.Client
+	privateKey  *ecdsa.PrivateKey
+	oracleAddr  common.Address
+	oracleABI   abi.ABI
 }
 
+const OracleWriteABI = `[{"inputs":[{"internalType":"uint256","name":"requestId","type":"uint256"},{"internalType":"uint256","name":"value","type":"uint256"},{"internalType":"uint256[8]","name":"zkpProof","type":"uint256[8]"},{"internalType":"uint256[2]","name":"publicInputs","type":"uint256[2]"}],"name":"fulfillData","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
+
 // NewJobManager creates a new JobManager
-func NewJobManager() *JobManager {
-	return &JobManager{
-		jobQueue: make(chan JobRequest, 100),
+func NewJobManager(am *adapters.AdapterManager, client *ethclient.Client, pkHex, contractAddr string) (*JobManager, error) {
+	pk, err := crypto.HexToECDSA(pkHex)
+	if err != nil {
+		return nil, fmt.Errorf("invalid private key: %w", err)
 	}
+
+	parsed, err := abi.JSON(strings.NewReader(OracleWriteABI))
+	if err != nil {
+		return nil, err
+	}
+
+	return &JobManager{
+		jobQueue:   make(chan JobRequest, 100),
+		adapters:   am,
+		client:     client,
+		privateKey: pk,
+		oracleAddr: common.HexToAddress(contractAddr),
+		oracleABI:  parsed,
+	}, nil
 }
 
 // SubmitJob adds a job to the processing queue
@@ -53,64 +83,129 @@ func (jm *JobManager) SubmitJob(job JobRequest) {
 // Start begins processing jobs from the queue
 func (jm *JobManager) Start(ctx context.Context) {
 	log.Info().Msg("Job Manager started")
+	
+	// Ensure ZKP system is ready
+	if err := zkp.Init(); err != nil {
+		log.Error().Err(err).Msg("Failed to initialize ZKP system. ZK proofs will fail.")
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			log.Info().Msg("Job Manager stopping")
 			return
 		case job := <-jm.jobQueue:
-			jm.processJob(job)
+			go jm.processJob(ctx, job) // Process in goroutine for concurrency
 		}
 	}
 }
 
-func (jm *JobManager) processJob(job JobRequest) {
+func (jm *JobManager) processJob(ctx context.Context, job JobRequest) {
 	log.Info().Str("job_id", job.ID).Msg("Processing job")
 	
-	// Simulate processing time
-	time.Sleep(100 * time.Millisecond)
-
 	switch job.Type {
 	case JobTypeDataFeed:
-		jm.handleDataFeed(job)
+		jm.handleDataFeed(ctx, job)
 	case JobTypeVRF:
-		jm.handleVRF(job)
+		log.Warn().Msg("VRF not yet fully implemented in JobManager")
 	default:
 		log.Warn().Str("type", string(job.Type)).Msg("Unknown job type")
 	}
 }
 
-func (jm *JobManager) handleDataFeed(job JobRequest) {
-	// Logic to fetch external data (via adapters) and aggregate
-	// For now, we simulate aggregation
-	results := []float64{100.2, 100.5, 99.8, 101.0, 100.3}
-	median := CalculateMedian(results)
-	log.Info().Str("job_id", job.ID).Float64("median", median).Msg("Data Feed Aggregated")
+func (jm *JobManager) handleDataFeed(ctx context.Context, job JobRequest) {
+	// 1. Fetch Data
+	url, _ := job.Params["url"].(string)
 	
-	// TODO: Generate ZKP for the result (Privacy Mode)
-}
-
-func (jm *JobManager) handleVRF(job JobRequest) {
-	// Logic for VRF
-	log.Info().Str("job_id", job.ID).Msg("VRF Request Processed")
-}
-
-// CalculateMedian is a utility to find the median of a slice of floats
-func CalculateMedian(values []float64) float64 {
-	sort.Float64s(values)
-	n := len(values)
-	if n == 0 {
-		return 0
+	req := adapters.FetchDataRequest{
+		URL:      url,
+		Method:   "GET",
+		Path:     "price", 
+		Obscured: false,
 	}
-	if n%2 == 1 {
-		return values[n/2]
+
+	result, err := jm.adapters.Fetch(req)
+	if err != nil {
+		log.Error().Err(err).Str("job_id", job.ID).Msg("Failed to fetch external data")
+		return
 	}
-	return (values[n/2-1] + values[n/2]) / 2.0
+
+	log.Info().Interface("result", result).Msg("Data Fetched")
+
+	valFloat, ok := result.(float64)
+	if !ok {
+		log.Error().Msg("Result is not a float number")
+		return 
+	}
+	
+	valueBig := new(big.Int).SetInt64(int64(valFloat * 100)) 
+	
+	// 2. Generate ZKP
+	minBin, _ := job.Params["min"].(*big.Int)
+	maxBin, _ := job.Params["max"].(*big.Int)
+	if minBin == nil { minBin = big.NewInt(0) }
+	if maxBin == nil { maxBin = new(big.Int).Set(valueBig).Add(valueBig, big.NewInt(1000)) }
+
+	proof, err := zkp.GenerateProof(valueBig, minBin, maxBin)
+	if err != nil {
+		log.Error().Err(err).Msg("ZKP Generation failed")
+		return
+	}
+
+	serializedProof, err := zkp.SerializeProof(proof)
+	if err != nil {
+		log.Error().Err(err).Msg("ZKP Serialization failed")
+		return
+	}
+
+	// Public inputs: Min, Max
+	pubInputs := [2]*big.Int{minBin, maxBin}
+	
+	// 3. Submit Transaction
+	jm.submitFulfillment(ctx, job.ID, valueBig, serializedProof, pubInputs)
 }
 
-// AggregateZKP would interface with gnark to produce a proof of aggregation
-func AggregateZKP(inputs []big.Int) ([]byte, error) {
-	// Placeholder for ZK Aggregation logic using gnark
-	// In a real implementation, this would compile/load the circuit and prove it
-	return []byte("mock_zk_proof"), nil
+func (jm *JobManager) submitFulfillment(ctx context.Context, jobIDStr string, value *big.Int, proof [8]*big.Int, pubInputs [2]*big.Int) {
+	// Parse ID
+	reqID := new(big.Int)
+	reqID.SetString(jobIDStr, 10)
+
+	// Prepare Tx
+	nonce, err := jm.client.PendingNonceAt(ctx, crypto.PubkeyToAddress(jm.privateKey.PublicKey))
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get nonce")
+		return
+	}
+
+	gasPrice, err := jm.client.SuggestGasPrice(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get gas price")
+		return
+	}
+
+	auth, err := jm.client.ChainID(ctx)
+	if err != nil { return }
+	
+	// Pack Data
+	data, err := jm.oracleABI.Pack("fulfillData", reqID, value, proof, pubInputs)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to pack ABI")
+		return
+	}
+
+	tx := types.NewTransaction(nonce, jm.oracleAddr, big.NewInt(0), 500000, gasPrice, data)
+	
+	signedTx, err := types.SignTx(tx, types.NewEIP155Signer(auth), jm.privateKey)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to sign tx")
+		return
+	}
+
+	err = jm.client.SendTransaction(ctx, signedTx)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to send transaction")
+		return
+	}
+
+	log.Info().Str("tx_hash", signedTx.Hash().Hex()).Msg("Fulfillment Transaction Sent")
 }

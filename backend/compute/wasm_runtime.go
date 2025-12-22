@@ -3,7 +3,6 @@ package compute
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"

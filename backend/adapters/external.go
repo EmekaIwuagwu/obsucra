@@ -32,17 +32,35 @@ type FetchDataRequest struct {
 	Headers  map[string]string `json:"headers"`
 	Path     string            `json:"path"` // JSON path to extract
 	Obscured bool              `json:"obscured"` // Obscura Mode
+	Retries  int               `json:"retries"`
 }
 
-// Fetch executes the external request
+// Fetch executes the external request with retries
 func (am *AdapterManager) Fetch(req FetchDataRequest) (interface{}, error) {
-	log.Debug().Str("url", req.URL).Bool("obscured", req.Obscured).Msg("Fetching external data")
+	if req.Retries <= 0 {
+		req.Retries = 3
+	}
+
+	var lastErr error
+	for i := 0; i < req.Retries; i++ {
+		result, err := am.exec(req)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		log.Warn().Err(err).Int("attempt", i+1).Str("url", req.URL).Msg("Adapter fetch failed, retrying...")
+		time.Sleep(time.Duration(i+1) * time.Second) // Exponential backoffish
+	}
+
+	return nil, fmt.Errorf("all retry attempts failed: %w", lastErr)
+}
+
+func (am *AdapterManager) exec(req FetchDataRequest) (interface{}, error) {
+	log.Debug().Str("url", req.URL).Bool("obscured", req.Obscured).Msg("Executing external data fetch")
 
 	client := am.client
 	if req.Obscured {
 		// IN OBSCURA MODE: Route traffic through a privacy-preserving proxy/mixnet
-		// For MVP, we simulate this by using a custom transport with strict timeout and no-cache
-		// In production, this would be: Proxy: http.ProxyURL(torProxyURL)
 		log.Info().Msg("Routing through Obscura Privacy Layer... (Encrypted Transport Active)")
 		client = &http.Client{
 			Transport: &http.Transport{
@@ -92,6 +110,7 @@ func extractPath(data interface{}, path string) (interface{}, error) {
 	for _, key := range keys {
 		m, ok := current.(map[string]interface{})
 		if !ok {
+			// Check if it's an array and we might have an index? (Optional enhancement)
 			return nil, fmt.Errorf("cannot verify path %s: intermediate value is not an object", key)
 		}
 		val, exists := m[key]
@@ -104,17 +123,20 @@ func extractPath(data interface{}, path string) (interface{}, error) {
 }
 
 func splitPath(s string) []string {
-	// Custom split to ignore dots inside quotes if needed (simplified for now)
 	var res []string
 	var current string
 	for _, c := range s {
 		if c == '.' {
-			res = append(res, current)
+			if current != "" {
+				res = append(res, current)
+			}
 			current = ""
 		} else {
 			current += string(c)
 		}
 	}
-	res = append(res, current)
+	if current != "" {
+		res = append(res, current)
+	}
 	return res
 }

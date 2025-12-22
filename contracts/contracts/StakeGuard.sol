@@ -21,6 +21,7 @@ contract StakeGuard is Ownable, ReentrancyGuard {
     }
 
     mapping(address => Staker) public stakers;
+    mapping(address => bool) public slashers;
     uint256 public totalStaked;
     uint256 public constant MIN_STAKE = 100 * 10**18; // 100 OBSCURA
     uint256 public constant UNBONDING_PERIOD = 7 days;
@@ -64,10 +65,19 @@ contract StakeGuard is Ownable, ReentrancyGuard {
         emit Unstaked(msg.sender, _amount);
     }
 
+    modifier onlySlasher() {
+        require(msg.sender == owner() || slashers[msg.sender], "Not authorized to slash");
+        _;
+    }
+
+    function setSlasher(address _slasher, bool _status) external onlyOwner {
+        slashers[_slasher] = _status;
+    }
+
     /**
      * @dev Slashing mechanism for malicious nodes (called by governance or oracle core)
      */
-    function slash(address _node, uint256 _amount, string calldata _reason) external onlyOwner {
+    function slash(address _node, uint256 _amount, string calldata _reason) external onlySlasher {
         Staker storage s = stakers[_node];
         require(s.balance >= _amount, "Slashing more than balance");
 
