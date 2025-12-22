@@ -19,32 +19,26 @@ func NewReputationManager() *ReputationManager {
 	}
 }
 
-// UpdateScore adjusts a node's reputation based on behavior
-// successful: true if the node performed a job correctly
-func (rm *ReputationManager) UpdateScore(nodeID string, successful bool) {
+// UpdateReputation adjusts a node's reputation by a specific delta
+func (rm *ReputationManager) UpdateReputation(nodeID string, delta float64) {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
 	current, exists := rm.scores[nodeID]
 	if !exists {
-		current = 50.0 // Starting neutral score
+		current = 50.0
 	}
 
-	if successful {
-		current += 1.0
-		if current > 100.0 {
-			current = 100.0
-		}
-	} else {
-		// Penalize more heavily for failures
-		current -= 5.0
-		if current < 0.0 {
-			current = 0.0
-		}
+	current += delta
+	if current > 100.0 {
+		current = 100.0
+	}
+	if current < 0.0 {
+		current = 0.0
 	}
 
 	rm.scores[nodeID] = current
-	log.Debug().Str("node_id", nodeID).Float64("new_score", current).Bool("success", successful).Msg("Reputation updated")
+	log.Debug().Str("node_id", nodeID).Float64("new_score", current).Float64("delta", delta).Msg("Reputation adjusted")
 }
 
 // GetScore returns the current score of a node

@@ -2,8 +2,6 @@ package node
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"fmt"
 	"math/big"
 	"strings"
 	"sync"
@@ -11,12 +9,11 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/rs/zerolog/log"
 
 	"github.com/obscura-network/obscura-node/adapters"
+	"github.com/obscura-network/obscura-node/security"
+	"github.com/obscura-network/obscura-node/vrf"
 	"github.com/obscura-network/obscura-node/zkp"
 )
 
@@ -42,21 +39,20 @@ type JobManager struct {
 	jobQueue    chan JobRequest
 	mu          sync.RWMutex
 	adapters    *adapters.AdapterManager
-	client      *ethclient.Client
-	privateKey  *ecdsa.PrivateKey
+	txMgr       *TxManager
+	vrfMgr      *vrf.RandomnessManager
+	repMgr      *security.ReputationManager
 	oracleAddr  common.Address
 	oracleABI   abi.ABI
 }
 
-const OracleWriteABI = `[{"inputs":[{"internalType":"uint256","name":"requestId","type":"uint256"},{"internalType":"uint256","name":"value","type":"uint256"},{"internalType":"uint256[8]","name":"zkpProof","type":"uint256[8]"},{"internalType":"uint256[2]","name":"publicInputs","type":"uint256[2]"}],"name":"fulfillData","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
+const OracleWriteABI = `[
+	{"inputs":[{"internalType":"uint256","name":"requestId","type":"uint256"},{"internalType":"uint256","name":"value","type":"uint256"},{"internalType":"uint256[8]","name":"zkpProof","type":"uint256[8]"},{"internalType":"uint256[2]","name":"publicInputs","type":"uint256[2]"}],"name":"fulfillData","outputs":[],"stateMutability":"nonpayable","type":"function"},
+	{"inputs":[{"internalType":"uint256","name":"requestId","type":"uint256"},{"internalType":"uint256","name":"randomness","type":"uint256"},{"internalType":"bytes","name":"proof","type":"bytes"}],"name":"fulfillRandomness","outputs":[],"stateMutability":"nonpayable","type":"function"}
+]`
 
 // NewJobManager creates a new JobManager
-func NewJobManager(am *adapters.AdapterManager, client *ethclient.Client, pkHex, contractAddr string) (*JobManager, error) {
-	pk, err := crypto.HexToECDSA(pkHex)
-	if err != nil {
-		return nil, fmt.Errorf("invalid private key: %w", err)
-	}
-
+func NewJobManager(am *adapters.AdapterManager, txMgr *TxManager, vrfMgr *vrf.RandomnessManager, repMgr *security.ReputationManager, contractAddr string) (*JobManager, error) {
 	parsed, err := abi.JSON(strings.NewReader(OracleWriteABI))
 	if err != nil {
 		return nil, err
@@ -65,8 +61,9 @@ func NewJobManager(am *adapters.AdapterManager, client *ethclient.Client, pkHex,
 	return &JobManager{
 		jobQueue:   make(chan JobRequest, 100),
 		adapters:   am,
-		client:     client,
-		privateKey: pk,
+		txMgr:      txMgr,
+		vrfMgr:     vrfMgr,
+		repMgr:     repMgr,
 		oracleAddr: common.HexToAddress(contractAddr),
 		oracleABI:  parsed,
 	}, nil
@@ -107,7 +104,7 @@ func (jm *JobManager) processJob(ctx context.Context, job JobRequest) {
 	case JobTypeDataFeed:
 		jm.handleDataFeed(ctx, job)
 	case JobTypeVRF:
-		log.Warn().Msg("VRF not yet fully implemented in JobManager")
+		jm.handleVRF(ctx, job)
 	default:
 		log.Warn().Str("type", string(job.Type)).Msg("Unknown job type")
 	}
@@ -127,6 +124,7 @@ func (jm *JobManager) handleDataFeed(ctx context.Context, job JobRequest) {
 	result, err := jm.adapters.Fetch(req)
 	if err != nil {
 		log.Error().Err(err).Str("job_id", job.ID).Msg("Failed to fetch external data")
+		jm.repMgr.UpdateReputation("self", -1.0) // Local penalty
 		return
 	}
 
@@ -170,22 +168,6 @@ func (jm *JobManager) submitFulfillment(ctx context.Context, jobIDStr string, va
 	reqID := new(big.Int)
 	reqID.SetString(jobIDStr, 10)
 
-	// Prepare Tx
-	nonce, err := jm.client.PendingNonceAt(ctx, crypto.PubkeyToAddress(jm.privateKey.PublicKey))
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to get nonce")
-		return
-	}
-
-	gasPrice, err := jm.client.SuggestGasPrice(ctx)
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to get gas price")
-		return
-	}
-
-	auth, err := jm.client.ChainID(ctx)
-	if err != nil { return }
-	
 	// Pack Data
 	data, err := jm.oracleABI.Pack("fulfillData", reqID, value, proof, pubInputs)
 	if err != nil {
@@ -193,19 +175,43 @@ func (jm *JobManager) submitFulfillment(ctx context.Context, jobIDStr string, va
 		return
 	}
 
-	tx := types.NewTransaction(nonce, jm.oracleAddr, big.NewInt(0), 500000, gasPrice, data)
+	txHash, err := jm.txMgr.SendTransaction(ctx, jm.oracleAddr, data, big.NewInt(0))
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to send fulfillment transaction")
+		return
+	}
+
+	log.Info().Str("tx_hash", txHash.Hex()).Msg("Fulfillment Transaction Sent")
+}
+
+func (jm *JobManager) handleVRF(ctx context.Context, job JobRequest) {
+	seed, _ := job.Params["seed"].(string)
 	
-	signedTx, err := types.SignTx(tx, types.NewEIP155Signer(auth), jm.privateKey)
+	valStr, proofStr, err := jm.vrfMgr.GenerateRandomness(seed)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to sign tx")
+		log.Error().Err(err).Msg("VRF Generation failed")
 		return
 	}
 
-	err = jm.client.SendTransaction(ctx, signedTx)
+	randomValue := new(big.Int)
+	randomValue.SetString(valStr, 10)
+	
+	// Convert proof hex to bytes
+	// Note: job.ID is the string decimal ID
+	reqID := new(big.Int)
+	reqID.SetString(job.ID, 10)
+
+	data, err := jm.oracleABI.Pack("fulfillRandomness", reqID, randomValue, []byte(proofStr))
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to send transaction")
+		log.Error().Err(err).Msg("Failed to pack fulfillRandomness")
 		return
 	}
 
-	log.Info().Str("tx_hash", signedTx.Hash().Hex()).Msg("Fulfillment Transaction Sent")
+	txHash, err := jm.txMgr.SendTransaction(ctx, jm.oracleAddr, data, big.NewInt(0))
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to send VRF fulfillment")
+		return
+	}
+
+	log.Info().Str("tx_hash", txHash.Hex()).Msg("VRF Fulfillment Sent")
 }

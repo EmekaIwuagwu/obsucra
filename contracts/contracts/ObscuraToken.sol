@@ -12,4 +12,18 @@ contract ObscuraToken is ERC20, Ownable {
     function mint(address to, uint256 amount) public onlyOwner {
         _mint(to, amount);
     }
+
+    function burn(uint256 amount) public {
+        _burn(msg.sender, amount);
+    }
+
+    /**
+     * @dev Distribution logic (placeholder for protocol treasury)
+     */
+    function distributeFees(address[] calldata recipients, uint256[] calldata amounts) external onlyOwner {
+        require(recipients.length == amounts.length, "Mismatched arrays");
+        for (uint256 i = 0; i < recipients.length; i++) {
+            _transfer(msg.sender, recipients[i], amounts[i]);
+        }
+    }
 }

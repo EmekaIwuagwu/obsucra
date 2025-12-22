@@ -17,15 +17,22 @@ type RandomnessManager struct {
 	privateKey *ecdsa.PrivateKey
 }
 
-// NewRandomnessManager creates a new VRF manager with a generated key (for now)
-// In prod, pass the key from Config
-func NewRandomnessManager() *RandomnessManager {
-	// Generate a new key for this session (Prototype)
-	// In production: Load from KeyStore
-	pk, err := crypto.GenerateKey()
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to generate VRF key")
+// NewRandomnessManager creates a new VRF manager.
+func NewRandomnessManager(pkHex string) *RandomnessManager {
+	var pk *ecdsa.PrivateKey
+	var err error
+
+	if pkHex != "" && pkHex != "0000000000000000000000000000000000000000000000000000000000000000" {
+		pk, err = crypto.HexToECDSA(pkHex)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to load VRF private key from config, generating fresh one")
+			pk, _ = crypto.GenerateKey()
+		}
+	} else {
+		pk, _ = crypto.GenerateKey()
+		log.Warn().Msg("No VRF private key provided, using ephemeral session key")
 	}
+
 	log.Info().Str("public_key", crypto.PubkeyToAddress(pk.PublicKey).Hex()).Msg("VRF Manager Initialized")
 	
 	return &RandomnessManager{

@@ -12,8 +12,11 @@ import (
 )
 
 // Extended ABI definition (mocked for SDK prototype)
-const OracleABI = `[{"inputs":[{"internalType":"string","name":"apiUrl","type":"string"},{"internalType":"uint256","name":"min","type":"uint256"},{"internalType":"uint256","name":"max","type":"uint256"},{"internalType":"string","name":"metadata","type":"string"}],"name":"requestData","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"requests","outputs":[{"internalType":"uint256","name":"id","type":"uint256"},{"internalType":"string","name":"apiUrl","type":"string"},{"internalType":"address","name":"requester","type":"address"},{"internalType":"uint256","name":"value","type":"uint256"},{"internalType":"bool","name":"resolved","type":"bool"},{"internalType":"uint256","name":"minThreshold","type":"uint256"},{"internalType":"uint256","name":"maxThreshold","type":"uint256"},{"internalType":"string","name":"metadata","type":"string"}],"stateMutability":"view","type":"function"},
-{"inputs":[{"internalType":"string","name":"seed","type":"string"}],"name":"requestRandomness","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"}]`
+const OracleABI = `[
+	{"inputs":[{"internalType":"string","name":"apiUrl","type":"string"},{"internalType":"uint256","name":"min","type":"uint256"},{"internalType":"uint256","name":"max","type":"uint256"},{"internalType":"string","name":"metadata","type":"string"}],"name":"requestData","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},
+	{"inputs":[{"internalType":"uint256","name":"requestId","type":"uint256"},{"internalType":"uint256","name":"value","type":"uint256"},{"internalType":"uint256[8]","name":"zkpProof","type":"uint256[8]"},{"internalType":"uint256[2]","name":"publicInputs","type":"uint256[2]"}],"name":"fulfillData","outputs":[],"stateMutability":"nonpayable","type":"function"},
+	{"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"requests","outputs":[{"internalType":"uint256","name":"id","type":"uint256"},{"internalType":"string","name":"apiUrl","type":"string"},{"internalType":"address","name":"requester","type":"address"},{"internalType":"bool","name":"resolved","type":"bool"},{"internalType":"uint256","name":"finalValue","type":"uint256"},{"internalType":"uint256","name":"createdAt","type":"uint256"},{"internalType":"uint256","name":"minThreshold","type":"uint256"},{"internalType":"uint256","name":"maxThreshold","type":"uint256"},{"internalType":"string","name":"metadata","type":"string"}],"stateMutability":"view","type":"function"}
+]`
 
 // ObscuraClient provides a high-level SDK for interacting with the Obscura Network.
 type ObscuraClient struct {
@@ -66,8 +69,8 @@ func (c *ObscuraClient) GetRequestStatus(ctx context.Context, requestID *big.Int
 		return false, nil, err
 	}
 	
-	// out[4] is the 'resolved' boolean, out[3] is the 'value'
-	return out[4].(bool), out[3].(*big.Int), nil
+	// out[3] is the 'resolved' boolean, out[4] is the 'finalValue'
+	return out[3].(bool), out[4].(*big.Int), nil
 }
 
 // VerifyProof verifies a ZK proof locally before trusting the data.

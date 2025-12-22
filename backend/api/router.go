@@ -19,6 +19,13 @@ type GlobalState struct {
 	Logs        []string
 }
 
+type Feed struct {
+	Name   string  `json:"name"`
+	Price  string  `json:"price"`
+	Status string  `json:"status"`
+	Trend  float64 `json:"trend"`
+}
+
 // ... existing GlobalState methods ...
 
 type NetworkStats struct {
@@ -74,18 +81,18 @@ func (s *GlobalState) UpdatePrice(name, price, status string, trend float64) {
 	s.PriceFeeds = append(s.PriceFeeds, Feed{name, price, status, trend})
 }
 
-// ... existing methods ...
-
-type Feed struct {
-	Name   string  `json:"name"`
-	Price  string  `json:"price"`
-	Status string  `json:"status"`
-	Trend  float64 `json:"trend"`
-}
+const (
+	StatusVerified = "Verified"
+	StatusPending  = "Pending"
+)
 
 func NewRouter() *mux.Router {
 	r := mux.NewRouter()
 	r.HandleFunc("/api/stats", getStats).Methods("GET")
+	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	}).Methods("GET")
 	return r
 }
 

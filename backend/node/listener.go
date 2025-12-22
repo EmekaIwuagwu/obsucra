@@ -25,7 +25,10 @@ type EventListener struct {
 }
 
 // Hardcoded ABI for Event Parsing (Partial)
-const OracleEventABI = `[{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"requestId","type":"uint256"},{"indexed":false,"internalType":"string","name":"apiUrl","type":"string"},{"indexed":false,"internalType":"uint256","name":"min","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"max","type":"uint256"},{"indexed":true,"internalType":"address","name":"requester","type":"address"}],"name":"RequestData","type":"event"}]`
+const OracleEventABI = `[
+	{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"requestId","type":"uint256"},{"indexed":false,"internalType":"string","name":"apiUrl","type":"string"},{"indexed":false,"internalType":"uint256","name":"min","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"max","type":"uint256"},{"indexed":true,"internalType":"address","name":"requester","type":"address"}],"name":"RequestData","type":"event"},
+	{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"requestId","type":"uint256"},{"indexed":false,"internalType":"string","name":"seed","type":"string"},{"indexed":true,"internalType":"address","name":"requester","type":"address"}],"name":"RandomnessRequested","type":"event"}
+]`
 
 // NewEventListener creates a new listener
 func NewEventListener(jm *JobManager, rpc string, contractAddr string) (*EventListener, error) {
@@ -100,39 +103,48 @@ func (el *EventListener) handleLog(vLog types.Log) {
 		return // Not our event
 	}
 
-	if event.Name == "RequestData" {
-		// Parse Data
-		// Indexed fields (topics): [0]Sig, [1]requestId, [2]requester
+	switch event.Name {
+	case "RequestData":
 		requestId := new(big.Int).SetBytes(vLog.Topics[1].Bytes())
 		requester := common.BytesToAddress(vLog.Topics[2].Bytes())
 
-		// Non-indexed fields (data)
 		var data struct {
 			ApiUrl string
 			Min    *big.Int
 			Max    *big.Int
 		}
 		
-		err := el.oracleABI.UnpackIntoInterface(&data, "RequestData", vLog.Data)
+		err = el.oracleABI.UnpackIntoInterface(&data, "RequestData", vLog.Data)
 		if err != nil {
-			log.Error().Err(err).Msg("Failed to unpack RequestData event")
+			log.Error().Err(err).Msg("Failed to unpack RequestData")
 			return
 		}
 
-		log.Info().
-			Str("req_id", requestId.String()).
-			Str("url", data.ApiUrl).
-			Msg("Oracle Request Detected")
-
-		// Dispatch Job
 		el.JobManager.SubmitJob(JobRequest{
 			ID:        requestId.String(),
 			Type:      JobTypeDataFeed,
-			Params:    map[string]interface{}{
-				"url": data.ApiUrl,
-				"min": data.Min,
-				"max": data.Max,
-			},
+			Params:    map[string]interface{}{"url": data.ApiUrl, "min": data.Min, "max": data.Max},
+			Requester: requester.Hex(),
+			Timestamp: time.Now(),
+		})
+
+	case "RandomnessRequested":
+		requestId := new(big.Int).SetBytes(vLog.Topics[1].Bytes())
+		requester := common.BytesToAddress(vLog.Topics[2].Bytes())
+
+		var data struct {
+			Seed string
+		}
+		err = el.oracleABI.UnpackIntoInterface(&data, "RandomnessRequested", vLog.Data)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to unpack RandomnessRequested")
+			return
+		}
+
+		el.JobManager.SubmitJob(JobRequest{
+			ID:        requestId.String(),
+			Type:      JobTypeVRF,
+			Params:    map[string]interface{}{"seed": data.Seed},
 			Requester: requester.Hex(),
 			Timestamp: time.Now(),
 		})

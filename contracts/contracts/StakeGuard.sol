@@ -94,4 +94,17 @@ contract StakeGuard is Ownable, ReentrancyGuard {
     function getReputation(address _node) external view returns (uint256) {
         return stakers[_node].reputation;
     }
+
+    /**
+     * @dev Adjust reputation score without slashing funds (for minor infractions or successful jobs)
+     */
+    function updateReputation(address _node, int256 _delta) external onlySlasher {
+        Staker storage s = stakers[_node];
+        if (_delta > 0) {
+            s.reputation += uint256(_delta);
+        } else {
+            uint256 absDelta = uint256(-_delta);
+            s.reputation = s.reputation > absDelta ? s.reputation - absDelta : 0;
+        }
+    }
 }

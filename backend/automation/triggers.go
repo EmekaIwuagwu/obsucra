@@ -48,7 +48,27 @@ func (tm *TriggerManager) CheckConditions(ctx context.Context) {
 }
 
 func (tm *TriggerManager) evaluate() {
-	// Logic to check off-chain conditions (e.g., price > X, time > Y)
-	// and execute on-chain tx via Relayer
+	if len(tm.tasks) == 0 {
+		return
+	}
+	
 	log.Debug().Int("tasks", len(tm.tasks)).Msg("Evaluating Automation Conditions")
+	
+	for _, task := range tm.tasks {
+		switch task.Type {
+		case "PriceThreshold":
+			threshold, _ := task.Params["threshold"].(float64)
+			current, _ := task.Params["current"].(float64)
+			
+			if current >= threshold {
+				log.Info().
+					Str("target", task.Target).
+					Float64("current", current).
+					Float64("threshold", threshold).
+					Msg("Automation Trigger Fired: Price Threshold Reached")
+				
+				// In production: jm.SubmitJob(...) or txMgr.SendTransaction(...)
+			}
+		}
+	}
 }

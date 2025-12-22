@@ -55,6 +55,19 @@ contract ObscuraOracle is Ownable, ReentrancyGuard {
     event RequestData(uint256 indexed requestId, string apiUrl, uint256 min, uint256 max, address indexed requester);
     event DataSubmitted(uint256 indexed requestId, address indexed node, uint256 value);
     event RequestFulfilled(uint256 indexed requestId, uint256 finalValue);
+    
+    event RandomnessRequested(uint256 indexed requestId, string seed, address indexed requester);
+    event RandomnessFulfilled(uint256 indexed requestId, uint256 randomness);
+
+    struct RandomnessRequest {
+        string seed;
+        address requester;
+        uint256 randomness;
+        bool resolved;
+    }
+
+    uint256 public nextRandomnessId;
+    mapping(uint256 => RandomnessRequest) public randomnessRequests;
 
     constructor(address _token, address _stakeGuard, address _verifier) Ownable(msg.sender) {
         obscuraToken = IERC20(_token);
@@ -240,5 +253,39 @@ contract ObscuraOracle is Ownable, ReentrancyGuard {
         uint256 bal = obscuraToken.balanceOf(address(this));
         // This is a safety check: in production we'd track protocolFees explicitly
         obscuraToken.transfer(msg.sender, bal);
+    }
+
+    // --- VRF Logic ---
+
+    function requestRandomness(string calldata seed) external nonReentrant returns (uint256) {
+        require(obscuraToken.transferFrom(msg.sender, address(this), paymentFee), "Fee payment failed");
+
+        uint256 requestId = nextRandomnessId++;
+        RandomnessRequest storage req = randomnessRequests[requestId];
+        req.seed = seed;
+        req.requester = msg.sender;
+
+        emit RandomnessRequested(requestId, seed, msg.sender);
+        return requestId;
+    }
+
+    function fulfillRandomness(uint256 requestId, uint256 randomness, bytes calldata proof) external nonReentrant {
+        require(whitelistedNodes[msg.sender], "Not whitelisted");
+        (,,, bool isActive) = stakeGuard.stakers(msg.sender);
+        require(isActive, "Node not active");
+
+        RandomnessRequest storage req = randomnessRequests[requestId];
+        require(!req.resolved, "Already resolved");
+
+        // In production, we'd verify the ZK or ECDSA proof here.
+        // For MVP, we record and emit.
+        req.randomness = randomness;
+        req.resolved = true;
+
+        // Reward the node
+        uint256 reward = (paymentFee * REWARD_PERCENT) / 100;
+        nodeRewards[msg.sender] += reward;
+
+        emit RandomnessFulfilled(requestId, randomness);
     }
 }

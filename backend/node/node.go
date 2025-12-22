@@ -16,8 +16,12 @@ import (
 
 	"github.com/obscura-network/obscura-node/adapters"
 	"github.com/obscura-network/obscura-node/ai"
+	"github.com/obscura-network/obscura-node/automation"
+	"github.com/obscura-network/obscura-node/crosschain"
 	"github.com/obscura-network/obscura-node/security"
+	"github.com/obscura-network/obscura-node/staking"
 	"github.com/obscura-network/obscura-node/storage"
+	"github.com/obscura-network/obscura-node/vrf"
 )
 
 // Config holds the configuration for the Obscura Node
@@ -35,10 +39,15 @@ type Node struct {
 	Config     Config
 	Logger     zerolog.Logger
 	JobManager *JobManager
-	AIModel    *ai.PredictiveModel
 	Adapters   *adapters.AdapterManager
 	Security   *security.ReputationManager
 	Storage    storage.Store
+	VRF        *vrf.RandomnessManager
+	AI         *ai.PredictiveModel
+	Automation *automation.TriggerManager
+	Bridge     *crosschain.CrossLink
+	StakeGuard *staking.StakeGuard
+	StakeSync  *StakeSync
 	Listener   *EventListener
 }
 
@@ -60,8 +69,10 @@ func NewNode() (*Node, error) {
 	viper.SetDefault("log_level", "info")
 	viper.SetDefault("telemetry_mode", true)
 	viper.SetDefault("db_path", "./node.db.json")
+	viper.SetDefault("ethereum_url", "http://localhost:8545")
 	viper.SetDefault("oracle_contract_address", "0x0000000000000000000000000000000000000000")
-	viper.SetDefault("private_key", "0000000000000000000000000000000000000000000000000000000000000000") // DUMMY
+	viper.SetDefault("stake_guard_address", "0x0000000000000000000000000000000000000000")
+	viper.SetDefault("private_key", "0000000000000000000000000000000000000000000000000000000000000000")
 
 	if err := viper.ReadInConfig(); err != nil {
 		logger.Warn().Err(err).Msg("Config file not found, using defaults/environment variables")
@@ -91,11 +102,21 @@ func NewNode() (*Node, error) {
 
 	// Initialize Components
 	adapterMgr := adapters.NewAdapterManager()
+	vrfMgr := vrf.NewRandomnessManager(viper.GetString("private_key"))
+	secMgr := security.NewReputationManager()
+	stakingMgr := staking.NewStakeGuard()
 	
+	// Initialize TxManager
+	txMgr, err := NewTxManager(client, viper.GetString("private_key"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to init tx manager: %w", err)
+	}
+
 	jobMgr, err := NewJobManager(
 		adapterMgr, 
-		client, 
-		viper.GetString("private_key"), 
+		txMgr, 
+		vrfMgr,
+		secMgr,
 		viper.GetString("oracle_contract_address"),
 	)
 	if err != nil {
@@ -103,7 +124,9 @@ func NewNode() (*Node, error) {
 	}
 
 	aiModel := ai.NewPredictiveModel()
-	secMgr := security.NewReputationManager()
+	automationMgr := automation.NewTriggerManager()
+	crosslink := crosschain.NewCrossLink()
+	stakeSync, _ := NewStakeSync(client, viper.GetString("stake_guard_address"), secMgr)
 	
 	listener, err := NewEventListener(jobMgr, cfg.EthereumURL, viper.GetString("oracle_contract_address"))
 	if err != nil {
@@ -114,10 +137,15 @@ func NewNode() (*Node, error) {
 		Config:     cfg,
 		Logger:     logger,
 		JobManager: jobMgr,
-		AIModel:    aiModel,
 		Adapters:   adapterMgr,
 		Security:   secMgr,
 		Storage:    store,
+		VRF:        vrfMgr,
+		AI:         aiModel,
+		Automation: automationMgr,
+		Bridge:     crosslink,
+		StakeGuard: stakingMgr,
+		StakeSync:  stakeSync,
 		Listener:   listener,
 	}, nil
 }
@@ -142,7 +170,7 @@ func (n *Node) Run() error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		n.AIModel.RunTrainingLoop(ctx)
+		n.AI.RunTrainingLoop(ctx)
 	}()
 
 	// Start Event Listener
@@ -150,6 +178,20 @@ func (n *Node) Run() error {
 	go func() {
 		defer wg.Done()
 		n.Listener.Start(ctx)
+	}()
+	
+	// Start Automation Trigger Service
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		n.Automation.CheckConditions(ctx)
+	}()
+
+	// Start Stake Guard Sync
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		n.StakeSync.Start(ctx)
 	}()
 
 	// Start API Server (Placeholder)

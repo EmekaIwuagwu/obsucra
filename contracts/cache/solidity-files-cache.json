@@ -2,8 +2,8 @@
   "_format": "hh-sol-cache-2",
   "files": {
     "C:\\Users\\emi\\Desktop\\katcoder\\obscura\\contracts\\contracts\\ObscuraOracle.sol": {
-      "lastModificationDate": 1766406687580,
-      "contentHash": "803b0f4267f3ae7509334a9178c82852",
+      "lastModificationDate": 1766408966043,
+      "contentHash": "ed1f8899d51ea78ef216ffa98ff7978d",
       "sourceName": "contracts/ObscuraOracle.sol",
       "solcConfig": {
         "version": "0.8.20",
@@ -271,8 +271,8 @@
       ]
     },
     "C:\\Users\\emi\\Desktop\\katcoder\\obscura\\contracts\\contracts\\StakeGuard.sol": {
-      "lastModificationDate": 1766406677211,
-      "contentHash": "3d82bb573841eaccd3c36277e13ad829",
+      "lastModificationDate": 1766409164088,
+      "contentHash": "8511462c226e78a6933d5383d8e9116c",
       "sourceName": "contracts/StakeGuard.sol",
       "solcConfig": {
         "version": "0.8.20",
@@ -347,8 +347,8 @@
       ]
     },
     "C:\\Users\\emi\\Desktop\\katcoder\\obscura\\contracts\\contracts\\ObscuraToken.sol": {
-      "lastModificationDate": 1766392387708,
-      "contentHash": "8a0cf2a12dbe9fcda60d1bf162565581",
+      "lastModificationDate": 1766409148785,
+      "contentHash": "3ed30a6e7ee39e6bbfdedbf09cb2a96b",
       "sourceName": "contracts/ObscuraToken.sol",
       "solcConfig": {
         "version": "0.8.20",
