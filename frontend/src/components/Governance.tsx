@@ -62,10 +62,16 @@ const Governance: React.FC = () => {
                         </div>
 
                         <div className="mt-4 flex justify-end gap-3">
-                            <button className="px-4 py-2 border border-gray-600 hover:border-white rounded text-sm transition-colors text-gray-300 hover:text-white">
+                            <button
+                                onClick={() => alert(`Showing details for proposal: ${prop.title}`)}
+                                className="px-4 py-2 border border-gray-600 hover:border-white rounded text-sm transition-colors text-gray-300 hover:text-white"
+                            >
                                 View Details
                             </button>
-                            <button className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded text-sm text-white font-bold transition-colors shadow-[0_0_10px_#4f46e5]">
+                            <button
+                                onClick={() => alert(`Casting vote for proposal: ${prop.title}`)}
+                                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded text-sm text-white font-bold transition-colors shadow-[0_0_10px_#4f46e5]"
+                            >
                                 Vote
                             </button>
                         </div>

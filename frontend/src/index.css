@@ -1,10 +1,24 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-obscura-bg: #000033;
+  --color-obscura-deep: #0A0A2A;
+  --color-accent: #FFD700;
+  --color-highlight: #4B0082;
+  --color-alert: #FF4500;
+  --color-neon: #00FFFF;
+  --color-purple: #FF00FF;
+
+  --animate-pulse-slow: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
 
 @layer base {
   body {
-    @apply bg-[#000033] text-white font-sans overflow-x-hidden;
+    /* @apply bg-[#000033] text-white font-sans overflow-x-hidden; */
+    background-color: var(--color-obscura-bg);
+    color: white;
+    font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+    overflow-x: hidden;
     background: radial-gradient(circle at center, #0a0a4a 0%, #000033 100%);
   }
 
@@ -14,7 +28,9 @@
   h4,
   h5,
   h6 {
-    @apply font-bold tracking-wide;
+    font-weight: bold;
+    letter-spacing: 0.025em;
+    /* tracking-wide */
   }
 }
 
@@ -53,9 +69,19 @@
     text-shadow: 0 0 10px #00FFFF, 0 0 20px #00FFFF;
   }
 
+  /* Additional Utilities */
+  .box-shadow-neon {
+    box-shadow: 0 0 10px #00FFFF, 0 0 20px #00FFFF;
+  }
+
   /* Inputs */
   .input-cosmic {
-    @apply w-full bg-black/20 border border-[#4B0082] rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-[#00FFFF] focus:ring-1 focus:ring-[#00FFFF] transition-all;
+    @apply w-full bg-black/20 border border-[#4B0082] rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none transition-all;
+
+    &:focus {
+      border-color: var(--color-neon);
+      box-shadow: 0 0 0 1px var(--color-neon);
+    }
   }
 }
 

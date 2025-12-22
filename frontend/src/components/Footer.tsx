@@ -1,5 +1,6 @@
 import React from 'react';
-import { Shield, Github, Twitter, MessageSquare, ExternalLink } from 'lucide-react';
+import { Github, Twitter, MessageSquare, ExternalLink } from 'lucide-react';
+import Logo from './Logo';
 
 const Footer: React.FC = () => {
     return (
@@ -8,8 +9,8 @@ const Footer: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-16 mb-24">
                     <div className="col-span-1 md:col-span-1">
                         <div className="flex items-center gap-2 mb-8">
-                            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-highlight to-neon flex items-center justify-center shadow-[0_0_15px_rgba(0,255,255,0.1)]">
-                                <Shield className="text-white w-5 h-5" />
+                            <div className="w-12 h-12">
+                                <Logo />
                             </div>
                             <span className="text-2xl font-black tracking-tighter neon-text">OBSCURA</span>
                         </div>
