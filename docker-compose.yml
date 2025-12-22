@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - LOG_LEVEL=debug
+      - ETHEREUM_URL=http://host.docker.internal:8545
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend/src:/app/src
+    command: npm run dev -- --host
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: obscura
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: obscura_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
