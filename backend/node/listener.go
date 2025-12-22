@@ -19,11 +19,12 @@ import (
 
 // EventListener monitors the blockchain for Oracle events
 type EventListener struct {
-	JobManager  *JobManager
-	RPCEndpoint string
-	ContractAddr common.Address
-	client      *ethclient.Client
-	oracleABI   abi.ABI
+	JobManager     *JobManager
+	RPCEndpoint    string
+	ContractAddr   common.Address
+	client         *ethclient.Client
+	oracleABI      abi.ABI
+	reorgProtector *ReorgProtector
 }
 
 // Hardcoded ABI for Event Parsing (Partial)
@@ -39,11 +40,15 @@ func NewEventListener(jm *JobManager, rpc string, contractAddr string) (*EventLi
 		return nil, err
 	}
 	
+	// Reorg protector will be initialized later when we have access to client and store
+	// For now, listener works without it (will be added in integration phase)
+	
 	return &EventListener{
-		JobManager:   jm,
-		RPCEndpoint:  rpc,
-		ContractAddr: common.HexToAddress(contractAddr),
-		oracleABI:    parsedABI,
+		JobManager:     jm,
+		RPCEndpoint:    rpc,
+		ContractAddr:   common.HexToAddress(contractAddr),
+		oracleABI:      parsedABI,
+		reorgProtector: nil, // Will be set later
 	}, nil
 }
 
@@ -100,6 +105,22 @@ func (el *EventListener) connectAndListen(ctx context.Context) error {
 }
 
 func (el *EventListener) handleLog(vLog types.Log) {
+	// Check reorg protection if available
+	if el.reorgProtector != nil {
+		shouldProcess, err := el.reorgProtector.ShouldProcessEvent(
+			vLog.BlockNumber,
+			vLog.TxHash,
+			vLog.Index,
+		)
+		if err != nil {
+			log.Error().Err(err).Msg("Reorg check failed")
+			return
+		}
+		if !shouldProcess {
+			return // Skip duplicate or unconfirmed event
+		}
+	}
+	
 	event, err := el.oracleABI.EventByID(vLog.Topics[0])
 	if err != nil {
 		return // Not our event
@@ -149,5 +170,10 @@ func (el *EventListener) handleLog(vLog types.Log) {
 			Requester: requester.Hex(),
 			Timestamp: time.Now(),
 		})
+	}
+	
+	// Mark event as processed
+	if el.reorgProtector != nil {
+		el.reorgProtector.MarkEventProcessed(vLog.BlockNumber, vLog.TxHash, vLog.Index)
 	}
 }

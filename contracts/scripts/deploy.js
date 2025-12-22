@@ -1,38 +1,97 @@
 const hre = require("hardhat");
+const fs = require("fs");
+const path = require("path");
 
 async function main() {
     const [deployer] = await hre.ethers.getSigners();
-    console.log("Deploying contracts with the account:", deployer.address);
+    console.log("=".repeat(60));
+    console.log("Deploying Obscura Oracle Contracts");
+    console.log("=".repeat(60));
+    console.log("Deployer address:", deployer.address);
+    console.log("Network:", hre.network.name);
+    console.log("");
 
-    // Deploy Token
+    const deployedAddresses = {};
+
+    // 1. Deploy ObscuraToken
+    console.log("📦 Deploying ObscuraToken...");
     const ObscuraToken = await hre.ethers.getContractFactory("ObscuraToken");
-    const token = await ObscuraToken.deploy();
+    const initialSupply = hre.ethers.parseEther("1000000"); // 1M tokens
+    const token = await ObscuraToken.deploy(initialSupply);
     await token.waitForDeployment();
     const tokenAddr = await token.getAddress();
-    console.log("ObscuraToken deployed to:", tokenAddr);
+    deployedAddresses.obscuraToken = tokenAddr;
+    console.log("✅ ObscuraToken deployed to:", tokenAddr);
+    console.log("");
 
-    // Deploy Mock Verifier (if needed, or use a real address)
-    // For now we assume a dummy address or deploy a MockVerifier
-    // const Verifier = await hre.ethers.getContractFactory("Verifier"); ...
-    const mockVerifierAddr = "0x0000000000000000000000000000000000000000";
-
-    // Deploy Oracle
-    const ObscuraOracle = await hre.ethers.getContractFactory("ObscuraOracle");
-    const oracle = await ObscuraOracle.deploy(mockVerifierAddr, hre.ethers.parseEther("0.1"));
-    await oracle.waitForDeployment();
-    console.log("ObscuraOracle deployed to:", await oracle.getAddress());
-
-    // Deploy StakeGuard
+    // 2. Deploy StakeGuard
+    console.log("📦 Deploying StakeGuard...");
     const StakeGuard = await hre.ethers.getContractFactory("StakeGuard");
     const stakeGuard = await StakeGuard.deploy(tokenAddr);
     await stakeGuard.waitForDeployment();
-    console.log("StakeGuard deployed to:", await stakeGuard.getAddress());
+    const stakeGuardAddr = await stakeGuard.getAddress();
+    deployedAddresses.stakeGuard = stakeGuardAddr;
+    console.log("✅ StakeGuard deployed to:", stakeGuardAddr);
+    console.log("");
 
-    // Deploy VRF
-    const VRF = await hre.ethers.getContractFactory("VRF");
-    const vrf = await VRF.deploy();
-    await vrf.waitForDeployment();
-    console.log("VRF deployed to:", await vrf.getAddress());
+    // 3. Deploy Verifier (ZK Proof Verifier)
+    console.log("📦 Deploying Verifier...");
+    const Verifier = await hre.ethers.getContractFactory("Verifier");
+    const verifier = await Verifier.deploy();
+    await verifier.waitForDeployment();
+    const verifierAddr = await verifier.getAddress();
+    deployedAddresses.verifier = verifierAddr;
+    console.log("✅ Verifier deployed to:", verifierAddr);
+    console.log("");
+
+    // 4. Deploy ObscuraOracle (with correct constructor: token, stakeGuard, verifier)
+    console.log("📦 Deploying ObscuraOracle...");
+    const ObscuraOracle = await hre.ethers.getContractFactory("ObscuraOracle");
+    const oracle = await ObscuraOracle.deploy(tokenAddr, stakeGuardAddr, verifierAddr);
+    await oracle.waitForDeployment();
+    const oracleAddr = await oracle.getAddress();
+    deployedAddresses.obscuraOracle = oracleAddr;
+    console.log("✅ ObscuraOracle deployed to:", oracleAddr);
+    console.log("");
+
+    // 5. Setup Roles
+    console.log("🔐 Setting up roles...");
+    const SLASHER_ROLE = await stakeGuard.SLASHER_ROLE();
+    const tx1 = await stakeGuard.grantRole(SLASHER_ROLE, oracleAddr);
+    await tx1.wait();
+    console.log("✅ Granted SLASHER_ROLE to ObscuraOracle");
+    console.log("");
+
+    // 6. Save deployment addresses to JSON
+    const outputPath = path.join(__dirname, "..", "deployed.json");
+    const output = {
+        network: hre.network.name,
+        chainId: (await hre.ethers.provider.getNetwork()).chainId.toString(),
+        deployer: deployer.address,
+        timestamp: new Date().toISOString(),
+        contracts: deployedAddresses
+    };
+
+    fs.writeFileSync(outputPath, JSON.stringify(output, null, 2));
+    console.log("💾 Deployment addresses saved to:", outputPath);
+    console.log("");
+
+    // 7. Summary
+    console.log("=".repeat(60));
+    console.log("Deployment Summary");
+    console.log("=".repeat(60));
+    console.log("ObscuraToken:  ", tokenAddr);
+    console.log("StakeGuard:    ", stakeGuardAddr);
+    console.log("Verifier:      ", verifierAddr);
+    console.log("ObscuraOracle: ", oracleAddr);
+    console.log("=".repeat(60));
+    console.log("");
+    console.log("✅ All contracts deployed successfully!");
+    console.log("");
+    console.log("Next steps:");
+    console.log("1. Update backend config with these addresses");
+    console.log("2. Whitelist oracle nodes in ObscuraOracle");
+    console.log("3. Fund nodes with OBSCURA tokens for staking");
 }
 
 main().catch((error) => {

@@ -16,6 +16,7 @@ import (
 
 	"github.com/obscura-network/obscura-node/adapters"
 	"github.com/obscura-network/obscura-node/ai"
+	"github.com/obscura-network/obscura-node/api"
 	"github.com/obscura-network/obscura-node/automation"
 	"github.com/obscura-network/obscura-node/crosschain"
 	"github.com/obscura-network/obscura-node/functions"
@@ -50,6 +51,7 @@ type Node struct {
 	StakeGuard *staking.StakeGuard
 	StakeSync  *StakeSync
 	Listener   *EventListener
+	Metrics    *api.MetricsCollector
 }
 
 // NewNode initializes a new Obscura Node
@@ -130,6 +132,7 @@ func NewNode() (*Node, error) {
 	automationMgr := automation.NewTriggerManager(jobMgr.JobQueue)
 	crosslink := crosschain.NewCrossLink()
 	stakeSync, _ := NewStakeSync(client, viper.GetString("stake_guard_address"), secMgr)
+	metricsCollector := api.NewMetricsCollector()
 	
 	listener, err := NewEventListener(jobMgr, cfg.EthereumURL, viper.GetString("oracle_contract_address"))
 	if err != nil {
@@ -150,6 +153,7 @@ func NewNode() (*Node, error) {
 		StakeGuard: stakingMgr,
 		StakeSync:  stakeSync,
 		Listener:   listener,
+		Metrics:    metricsCollector,
 	}, nil
 }
 
@@ -197,7 +201,7 @@ func (n *Node) Run() error {
 		n.StakeSync.Start(ctx)
 	}()
 
-	// Start API Server (Placeholder)
+	// Start Metrics & Monitoring API Server
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -218,6 +222,19 @@ func (n *Node) Run() error {
 }
 
 func (n *Node) serveAPI(ctx context.Context) {
-	// In a real implementation, this would be an HTTP/gRPC server
+	// Start metrics server on configured port
+	metricsServer := api.NewMetricsServer(n.Metrics, n.Config.Port)
+	
+	// Run server in goroutine
+	go func() {
+		if err := metricsServer.Start(); err != nil {
+			n.Logger.Error().Err(err).Msg("Metrics server failed")
+		}
+	}()
+	
+	n.Logger.Info().Str("port", n.Config.Port).Msg("Metrics API server started")
+	
+	// Wait for shutdown signal
 	<-ctx.Done()
+	n.Logger.Info().Msg("Metrics API server shutting down")
 }
