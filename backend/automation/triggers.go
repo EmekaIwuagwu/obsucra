@@ -2,8 +2,10 @@ package automation
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/obscura-network/obscura-node/oracle"
 	"github.com/rs/zerolog/log"
 )
 
@@ -16,13 +18,15 @@ type Condition struct {
 
 // TriggerManager handles conditional execution
 type TriggerManager struct {
-	tasks []Condition
+	tasks    []Condition
+	jobQueue chan<- oracle.JobRequest // Output channel for triggered jobs
 }
 
 // NewTriggerManager creates a new automation manager
-func NewTriggerManager() *TriggerManager {
+func NewTriggerManager(queue chan<- oracle.JobRequest) *TriggerManager {
 	return &TriggerManager{
-		tasks: make([]Condition, 0),
+		tasks:    make([]Condition, 0),
+		jobQueue: queue,
 	}
 }
 
@@ -67,7 +71,14 @@ func (tm *TriggerManager) evaluate() {
 					Float64("threshold", threshold).
 					Msg("Automation Trigger Fired: Price Threshold Reached")
 				
-				// In production: jm.SubmitJob(...) or txMgr.SendTransaction(...)
+				// Dispatch automated job
+				tm.jobQueue <- oracle.JobRequest{
+					ID:   fmt.Sprintf("auto-%d", time.Now().Unix()),
+					Type: oracle.JobTypeDataFeed,
+					Params: map[string]interface{}{
+						"url": task.Target,
+					},
+				}
 			}
 		}
 	}

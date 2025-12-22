@@ -18,6 +18,7 @@ import (
 	"github.com/obscura-network/obscura-node/ai"
 	"github.com/obscura-network/obscura-node/automation"
 	"github.com/obscura-network/obscura-node/crosschain"
+	"github.com/obscura-network/obscura-node/functions"
 	"github.com/obscura-network/obscura-node/security"
 	"github.com/obscura-network/obscura-node/staking"
 	"github.com/obscura-network/obscura-node/storage"
@@ -105,6 +106,7 @@ func NewNode() (*Node, error) {
 	vrfMgr := vrf.NewRandomnessManager(viper.GetString("private_key"))
 	secMgr := security.NewReputationManager()
 	stakingMgr := staking.NewStakeGuard()
+	computeMgr, _ := functions.NewComputeManager(context.Background())
 	
 	// Initialize TxManager
 	txMgr, err := NewTxManager(client, viper.GetString("private_key"))
@@ -117,6 +119,7 @@ func NewNode() (*Node, error) {
 		txMgr, 
 		vrfMgr,
 		secMgr,
+		computeMgr,
 		viper.GetString("oracle_contract_address"),
 	)
 	if err != nil {
@@ -124,7 +127,7 @@ func NewNode() (*Node, error) {
 	}
 
 	aiModel := ai.NewPredictiveModel()
-	automationMgr := automation.NewTriggerManager()
+	automationMgr := automation.NewTriggerManager(jobMgr.JobQueue)
 	crosslink := crosschain.NewCrossLink()
 	stakeSync, _ := NewStakeSync(client, viper.GetString("stake_guard_address"), secMgr)
 	

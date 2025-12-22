@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
-	// "gonum.org/v1/gonum/stat" // Uncomment when available
+	"gonum.org/v1/gonum/stat"
 )
 
 // PredictiveModel handles AI-based data feed forecasting
@@ -35,36 +35,27 @@ func (pm *PredictiveModel) AddDataPoint(feedID string, value float64) {
 	}
 }
 
-// Forecast predicts the next value for a feed
+// Forecast predicts the next value for a feed using Linear Regression
 func (pm *PredictiveModel) Forecast(feedID string) (float64, error) {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 
 	data, ok := pm.history[feedID]
 	if !ok || len(data) < 2 {
-		return 0, nil // Not enough data
+		return 0, nil
 	}
 
-	// Simple Linear Regression using Gonum logic (simplified here to avoid broken deps)
-	// In production: Use gonum/stat.LinearRegression
-	
-	n := float64(len(data))
-	var sumX, sumY, sumXY, sumXX float64
-	
-	for i, y := range data {
-		x := float64(i)
-		sumX += x
-		sumY += y
-		sumXY += x * y
-		sumXX += x * x
+	// Create X axis (0, 1, 2...)
+	xs := make([]float64, len(data))
+	for i := range xs {
+		xs[i] = float64(i)
 	}
 
-	slope := (n*sumXY - sumX*sumY) / (n*sumXX - sumX*sumX)
-	intercept := (sumY - slope*sumX) / n
+	// Calculate Linear Regression: y = alpha + beta*x
+	alpha, beta := stat.LinearRegression(xs, data, nil, false)
 
-	// Predict next value (x = n)
-	nextX := n
-	prediction := slope*nextX + intercept
+	// Predict next value (x = len(data))
+	prediction := alpha + beta*float64(len(data))
 
 	return prediction, nil
 }

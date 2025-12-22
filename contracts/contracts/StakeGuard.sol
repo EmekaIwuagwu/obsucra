@@ -2,15 +2,14 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-/**
- * @title StakeGuard
- * @dev Cryptoeconomic security layer for Obscura Network.
- * Handles node operator staking, reputation, and slashing.
- */
-contract StakeGuard is Ownable, ReentrancyGuard {
+contract StakeGuard is AccessControl, Pausable, ReentrancyGuard {
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    bytes32 public constant SLASHER_ROLE = keccak256("SLASHER_ROLE");
+
     IERC20 public immutable obscuraToken;
 
     struct Staker {
@@ -21,8 +20,9 @@ contract StakeGuard is Ownable, ReentrancyGuard {
     }
 
     mapping(address => Staker) public stakers;
-    mapping(address => bool) public slashers;
     uint256 public totalStaked;
+    address public treasury;
+
     uint256 public constant MIN_STAKE = 100 * 10**18; // 100 OBSCURA
     uint256 public constant UNBONDING_PERIOD = 7 days;
 
@@ -30,11 +30,22 @@ contract StakeGuard is Ownable, ReentrancyGuard {
     event Unstaked(address indexed user, uint256 amount);
     event Slashed(address indexed node, uint256 amount, string reason);
 
-    constructor(address _token) Ownable(msg.sender) {
+    constructor(address _token) {
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(ADMIN_ROLE, msg.sender);
         obscuraToken = IERC20(_token);
+        treasury = msg.sender;
     }
 
-    function stake(uint256 _amount) external nonReentrant {
+    function pause() external onlyRole(ADMIN_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(ADMIN_ROLE) {
+        _unpause();
+    }
+
+    function stake(uint256 _amount) external whenNotPaused nonReentrant {
         require(_amount >= MIN_STAKE, "Stake below minimum");
         
         obscuraToken.transferFrom(msg.sender, address(this), _amount);
@@ -49,7 +60,7 @@ contract StakeGuard is Ownable, ReentrancyGuard {
         emit Staked(msg.sender, _amount);
     }
 
-    function unstake(uint256 _amount) external nonReentrant {
+    function unstake(uint256 _amount) external whenNotPaused nonReentrant {
         Staker storage s = stakers[msg.sender];
         require(s.balance >= _amount, "Insufficient balance");
         require(block.timestamp >= s.lastStakeTime + UNBONDING_PERIOD, "Unbonding period not over");
@@ -65,19 +76,22 @@ contract StakeGuard is Ownable, ReentrancyGuard {
         emit Unstaked(msg.sender, _amount);
     }
 
-    modifier onlySlasher() {
-        require(msg.sender == owner() || slashers[msg.sender], "Not authorized to slash");
-        _;
+    function setTreasury(address _treasury) external onlyRole(ADMIN_ROLE) {
+        treasury = _treasury;
     }
 
-    function setSlasher(address _slasher, bool _status) external onlyOwner {
-        slashers[_slasher] = _status;
+    function setSlasher(address _slasher, bool _status) external onlyRole(ADMIN_ROLE) {
+        if (_status) {
+            _grantRole(SLASHER_ROLE, _slasher);
+        } else {
+            _revokeRole(SLASHER_ROLE, _slasher);
+        }
     }
 
     /**
      * @dev Slashing mechanism for malicious nodes (called by governance or oracle core)
      */
-    function slash(address _node, uint256 _amount, string calldata _reason) external onlySlasher {
+    function slash(address _node, uint256 _amount, string calldata _reason) external onlyRole(SLASHER_ROLE) whenNotPaused {
         Staker storage s = stakers[_node];
         require(s.balance >= _amount, "Slashing more than balance");
 
@@ -85,8 +99,8 @@ contract StakeGuard is Ownable, ReentrancyGuard {
         totalStaked -= _amount;
         s.reputation = s.reputation > 50 ? s.reputation - 50 : 0;
 
-        // Slashed funds could be burned or moved to an insurance pool
-        obscuraToken.transfer(owner(), _amount); 
+        // Slashed funds move to treasury
+        obscuraToken.transfer(treasury, _amount); 
         
         emit Slashed(_node, _amount, _reason);
     }
@@ -98,7 +112,7 @@ contract StakeGuard is Ownable, ReentrancyGuard {
     /**
      * @dev Adjust reputation score without slashing funds (for minor infractions or successful jobs)
      */
-    function updateReputation(address _node, int256 _delta) external onlySlasher {
+    function updateReputation(address _node, int256 _delta) external onlyRole(SLASHER_ROLE) {
         Staker storage s = stakers[_node];
         if (_delta > 0) {
             s.reputation += uint256(_delta);

@@ -6,7 +6,7 @@ import (
 )
 
 func main() {
-	err := zkp.ExportSolidityVerifier("../contracts/Verifier.sol")
+	err := zkp.ExportSolidityContract("../contracts/Verifier.sol")
 	if err != nil {
 		log.Fatalf("Failed to export verifier: %v", err)
 	}

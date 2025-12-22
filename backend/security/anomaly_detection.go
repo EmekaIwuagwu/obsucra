@@ -1,77 +1,64 @@
 package security
 
 import (
-	"math"
+	"sort"
+
 	"github.com/rs/zerolog/log"
+	"gonum.org/v1/gonum/stat"
 )
 
-// AnomalyDetector uses Z-Score analysis to identify outlier data points from oracle nodes.
-type AnomalyDetector struct {
-	Threshold float64 // Typically 2.0 or 3.0 for standard deviations
-}
-
-func NewAnomalyDetector(threshold float64) *AnomalyDetector {
-	return &AnomalyDetector{Threshold: threshold}
-}
-
-// DetectOutliers returns the indices of values that are statistically significant outliers.
-func (ad *AnomalyDetector) DetectOutliers(values []float64) []int {
-	if len(values) < 3 {
-		return nil
-	}
-
-	// Calculate Mean
-	var sum float64
-	for _, v := range values {
-		sum += v
-	}
-	mean := sum / float64(len(values))
-
-	// Calculate Standard Deviation
-	var sqDiffSum float64
-	for _, v := range values {
-		sqDiffSum += math.Pow(v-mean, 2)
-	}
-	stdDev := math.Sqrt(sqDiffSum / float64(len(values)))
-
-	if stdDev == 0 {
-		return nil
-	}
-
-	var outliers []int
-	for i, v := range values {
-		zScore := math.Abs(v-mean) / stdDev
-		if zScore > ad.Threshold {
-			log.Warn().
-				Float64("value", v).
-				Float64("zScore", zScore).
-				Msg("Anomaly detected in oracle data stream")
-			outliers = append(outliers, i)
-		}
-	}
-
-	return outliers
-}
-
-// DetectAndFilterAnomalies is a top-level helper to filter out outliers from a data set.
+// DetectAndFilterAnomalies identifies and removes outliers using the 
+// Median Absolute Deviation (MAD) method, which is more robust than Z-Score.
 func DetectAndFilterAnomalies(values []float64, threshold float64) []float64 {
-	detector := NewAnomalyDetector(threshold)
-	outlierIndices := detector.DetectOutliers(values)
-	
-	if len(outlierIndices) == 0 {
+	if len(values) < 3 {
 		return values
 	}
 
-	outlierMap := make(map[int]bool)
-	for _, idx := range outlierIndices {
-		outlierMap[idx] = true
+	// 1. Calculate Median
+	data := make([]float64, len(values))
+	copy(data, values)
+	sort.Float64s(data)
+	
+	median := stat.Quantile(0.5, stat.Empirical, data, nil)
+
+	// 2. Calculate MAD (Median Absolute Deviation)
+	absDeviations := make([]float64, len(values))
+	for i, v := range values {
+		dev := v - median
+		if dev < 0 {
+			dev = -dev
+		}
+		absDeviations[i] = dev
+	}
+	sort.Float64s(absDeviations)
+	mad := stat.Quantile(0.5, stat.Empirical, absDeviations, nil)
+
+	if mad == 0 {
+		return values // Avoid division by zero if all values are identical
 	}
 
+	// 3. Filter using Modified Z-Score
+	// Standard constant 0.6745 is used to make MAD consistent with standard deviation
 	var cleaned []float64
-	for i, v := range values {
-		if !outlierMap[i] {
+	for _, v := range values {
+		modifiedZ := 0.6745 * (v - median) / mad
+		if modifiedZ < 0 {
+			modifiedZ = -modifiedZ
+		}
+
+		if modifiedZ <= threshold {
 			cleaned = append(cleaned, v)
+		} else {
+			log.Warn().
+				Float64("value", v).
+				Float64("modified_z", modifiedZ).
+				Msg("Statistical outlier detected and filtered via MAD")
 		}
 	}
+
+	if len(cleaned) == 0 {
+		return values
+	}
+
 	return cleaned
 }

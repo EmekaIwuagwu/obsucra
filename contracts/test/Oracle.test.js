@@ -22,7 +22,6 @@ describe("ObscuraOracle Production Logic", function () {
         await stakeGuard.waitForDeployment();
 
         // 3. Deploy Mock Verifier (or address 0 for now)
-        // For simplicity in these tests, we use 0 address to skip ZK check
         verifier = ethers.ZeroAddress;
 
         // 4. Deploy Oracle
@@ -34,16 +33,22 @@ describe("ObscuraOracle Production Logic", function () {
         );
         await oracle.waitForDeployment();
 
-        // 5. Setup Nodes
+        // 5. Setup Roles
+        const SLASHER_ROLE = await stakeGuard.SLASHER_ROLE();
+        await stakeGuard.grantRole(SLASHER_ROLE, await oracle.getAddress());
+
+        // 6. Setup Nodes
         const nodes = [node1, node2, node3];
+        const ADMIN_ROLE = await oracle.ADMIN_ROLE();
         for (const node of nodes) {
             await token.transfer(node.address, MIN_STAKE);
             await token.connect(node).approve(await stakeGuard.getAddress(), MIN_STAKE);
             await stakeGuard.connect(node).stake(MIN_STAKE);
+            await oracle.grantRole(ADMIN_ROLE, owner.address); // Ensure owner has admin
             await oracle.setNodeWhitelist(node.address, true);
         }
 
-        // 6. Setup Requester
+        // 7. Setup Requester
         await token.transfer(requester.address, ethers.parseEther("10"));
         await token.connect(requester).approve(await oracle.getAddress(), ethers.parseEther("10"));
     });
@@ -125,7 +130,6 @@ describe("ObscuraOracle Production Logic", function () {
     });
 
     it("Should slash nodes that provide outlier values", async function () {
-        await stakeGuard.setSlasher(await oracle.getAddress(), true);
         await oracle.setMinResponses(3);
         await oracle.connect(requester).requestData("api.com/price", 0, 1000, "meta");
 

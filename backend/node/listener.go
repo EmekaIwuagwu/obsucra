@@ -13,6 +13,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/rs/zerolog/log"
+
+	"github.com/obscura-network/obscura-node/oracle"
 )
 
 // EventListener monitors the blockchain for Oracle events
@@ -105,46 +107,45 @@ func (el *EventListener) handleLog(vLog types.Log) {
 
 	switch event.Name {
 	case "RequestData":
-		requestId := new(big.Int).SetBytes(vLog.Topics[1].Bytes())
+		// requestId := new(big.Int).SetBytes(vLog.Topics[1].Bytes()) // Not used in new logic
 		requester := common.BytesToAddress(vLog.Topics[2].Bytes())
 
-		var data struct {
-			ApiUrl string
-			Min    *big.Int
-			Max    *big.Int
-		}
-		
-		err = el.oracleABI.UnpackIntoInterface(&data, "RequestData", vLog.Data)
+		vals, err := el.oracleABI.Unpack("RequestData", vLog.Data)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to unpack RequestData")
 			return
 		}
-
-		el.JobManager.SubmitJob(JobRequest{
-			ID:        requestId.String(),
-			Type:      JobTypeDataFeed,
-			Params:    map[string]interface{}{"url": data.ApiUrl, "min": data.Min, "max": data.Max},
+		
+		id := vals[0].(*big.Int).String()
+		url := vals[1].(string)
+		min := vals[2].(*big.Int)
+		max := vals[3].(*big.Int)
+		
+		el.JobManager.Dispatch(oracle.JobRequest{
+			ID:        id,
+			Type:      oracle.JobTypeDataFeed,
+			Params:    map[string]interface{}{"url": url, "min": min, "max": max},
 			Requester: requester.Hex(),
 			Timestamp: time.Now(),
 		})
 
 	case "RandomnessRequested":
-		requestId := new(big.Int).SetBytes(vLog.Topics[1].Bytes())
+		// requestId := new(big.Int).SetBytes(vLog.Topics[1].Bytes()) // Not used in new logic
 		requester := common.BytesToAddress(vLog.Topics[2].Bytes())
 
-		var data struct {
-			Seed string
-		}
-		err = el.oracleABI.UnpackIntoInterface(&data, "RandomnessRequested", vLog.Data)
+		vals, err := el.oracleABI.Unpack("RandomnessRequested", vLog.Data)
 		if err != nil {
 			log.Error().Err(err).Msg("Failed to unpack RandomnessRequested")
 			return
 		}
-
-		el.JobManager.SubmitJob(JobRequest{
-			ID:        requestId.String(),
-			Type:      JobTypeVRF,
-			Params:    map[string]interface{}{"seed": data.Seed},
+		
+		id := vals[0].(*big.Int).String()
+		seed := vals[1].(string)
+		
+		el.JobManager.Dispatch(oracle.JobRequest{
+			ID:        id,
+			Type:      oracle.JobTypeVRF,
+			Params:    map[string]interface{}{"seed": seed},
 			Requester: requester.Hex(),
 			Timestamp: time.Now(),
 		})

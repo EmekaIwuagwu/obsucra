@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
@@ -14,7 +15,10 @@ interface IVerifier {
     function verifyProof(uint256[8] calldata proof, uint256[2] calldata input) external view;
 }
 
-contract ObscuraOracle is Ownable, ReentrancyGuard {
+contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    bytes32 public constant SLASHER_ROLE = keccak256("SLASHER_ROLE");
+
     IERC20 public obscuraToken;
     IStakeGuard public stakeGuard;
     IVerifier public verifier;
@@ -69,7 +73,10 @@ contract ObscuraOracle is Ownable, ReentrancyGuard {
     uint256 public nextRandomnessId;
     mapping(uint256 => RandomnessRequest) public randomnessRequests;
 
-    constructor(address _token, address _stakeGuard, address _verifier) Ownable(msg.sender) {
+    constructor(address _token, address _stakeGuard, address _verifier) {
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(ADMIN_ROLE, msg.sender);
+        
         obscuraToken = IERC20(_token);
         stakeGuard = IStakeGuard(_stakeGuard);
         verifier = IVerifier(_verifier);
@@ -77,24 +84,32 @@ contract ObscuraOracle is Ownable, ReentrancyGuard {
 
     // --- Configuration ---
 
-    function setFee(uint256 _fee) external onlyOwner {
+    function setFee(uint256 _fee) external onlyRole(ADMIN_ROLE) {
         paymentFee = _fee;
     }
 
-    function setMinResponses(uint256 _min) external onlyOwner {
+    function setMinResponses(uint256 _min) external onlyRole(ADMIN_ROLE) {
         minResponses = _min;
     }
 
-    function setStakeGuard(address _stakeGuard) external onlyOwner {
+    function setStakeGuard(address _stakeGuard) external onlyRole(ADMIN_ROLE) {
         stakeGuard = IStakeGuard(_stakeGuard);
     }
 
-    function setVerifier(address _verifier) external onlyOwner {
+    function setVerifier(address _verifier) external onlyRole(ADMIN_ROLE) {
         verifier = IVerifier(_verifier);
     }
 
-    function setNodeWhitelist(address _node, bool _status) external onlyOwner {
+    function setNodeWhitelist(address _node, bool _status) external onlyRole(ADMIN_ROLE) {
         whitelistedNodes[_node] = _status;
+    }
+
+    function pause() external onlyRole(ADMIN_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(ADMIN_ROLE) {
+        _unpause();
     }
 
     // --- Core Logic ---
@@ -104,7 +119,7 @@ contract ObscuraOracle is Ownable, ReentrancyGuard {
         uint256 min, 
         uint256 max, 
         string calldata metadata
-    ) external nonReentrant returns (uint256) {
+    ) external whenNotPaused nonReentrant returns (uint256) {
         // Collect Payment
         require(obscuraToken.transferFrom(msg.sender, address(this), paymentFee), "Fee payment failed");
 
@@ -127,7 +142,7 @@ contract ObscuraOracle is Ownable, ReentrancyGuard {
         uint256 value, 
         uint256[8] calldata zkpProof, 
         uint256[2] calldata publicInputs
-    ) external nonReentrant {
+    ) external whenNotPaused nonReentrant {
         // 1. Authorization Check
         require(whitelistedNodes[msg.sender], "Not whitelisted");
         (,,, bool isActive) = stakeGuard.stakers(msg.sender);
@@ -224,7 +239,7 @@ contract ObscuraOracle is Ownable, ReentrancyGuard {
     }
 
     // Force finalize if stuck (by admin)
-    function forceFinalize(uint256 requestId) external onlyOwner {
+    function forceFinalize(uint256 requestId) external onlyRole(ADMIN_ROLE) {
         _aggregateAndFinalize(requestId);
     }
 
@@ -248,7 +263,7 @@ contract ObscuraOracle is Ownable, ReentrancyGuard {
         require(obscuraToken.transfer(msg.sender, paymentFee), "Refund failed");
     }
 
-    function withdrawFees() external onlyOwner {
+    function withdrawFees() external onlyRole(ADMIN_ROLE) {
         // Only withdraw non-rewarded surplus (platform fee)
         uint256 bal = obscuraToken.balanceOf(address(this));
         // This is a safety check: in production we'd track protocolFees explicitly
@@ -257,7 +272,7 @@ contract ObscuraOracle is Ownable, ReentrancyGuard {
 
     // --- VRF Logic ---
 
-    function requestRandomness(string calldata seed) external nonReentrant returns (uint256) {
+    function requestRandomness(string calldata seed) external whenNotPaused nonReentrant returns (uint256) {
         require(obscuraToken.transferFrom(msg.sender, address(this), paymentFee), "Fee payment failed");
 
         uint256 requestId = nextRandomnessId++;
@@ -269,7 +284,7 @@ contract ObscuraOracle is Ownable, ReentrancyGuard {
         return requestId;
     }
 
-    function fulfillRandomness(uint256 requestId, uint256 randomness, bytes calldata proof) external nonReentrant {
+    function fulfillRandomness(uint256 requestId, uint256 randomness, bytes calldata proof) external whenNotPaused nonReentrant {
         require(whitelistedNodes[msg.sender], "Not whitelisted");
         (,,, bool isActive) = stakeGuard.stakers(msg.sender);
         require(isActive, "Node not active");

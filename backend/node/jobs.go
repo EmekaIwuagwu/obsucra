@@ -5,43 +5,28 @@ import (
 	"math/big"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/rs/zerolog/log"
 
 	"github.com/obscura-network/obscura-node/adapters"
+	"github.com/obscura-network/obscura-node/functions"
+	"github.com/obscura-network/obscura-node/oracle"
 	"github.com/obscura-network/obscura-node/security"
 	"github.com/obscura-network/obscura-node/vrf"
 	"github.com/obscura-network/obscura-node/zkp"
 )
 
-// JobType defines the type of oracle job
-type JobType string
-
-const (
-	JobTypeDataFeed  JobType = "DATA_FEED"
-	JobTypeVRF       JobType = "VRF"
-)
-
-// JobRequest represents an incoming oracle request
-type JobRequest struct {
-	ID        string
-	Type      JobType
-	Params    map[string]interface{}
-	Requester string
-	Timestamp time.Time
-}
-
 // JobManager handles the lifecycle of jobs
 type JobManager struct {
-	jobQueue    chan JobRequest
+	JobQueue    chan oracle.JobRequest
 	mu          sync.RWMutex
 	adapters    *adapters.AdapterManager
 	txMgr       *TxManager
 	vrfMgr      *vrf.RandomnessManager
 	repMgr      *security.ReputationManager
+	computeMgr  *functions.ComputeManager
 	oracleAddr  common.Address
 	oracleABI   abi.ABI
 }
@@ -52,28 +37,27 @@ const OracleWriteABI = `[
 ]`
 
 // NewJobManager creates a new JobManager
-func NewJobManager(am *adapters.AdapterManager, txMgr *TxManager, vrfMgr *vrf.RandomnessManager, repMgr *security.ReputationManager, contractAddr string) (*JobManager, error) {
+func NewJobManager(am *adapters.AdapterManager, txMgr *TxManager, vrfMgr *vrf.RandomnessManager, repMgr *security.ReputationManager, cm *functions.ComputeManager, contractAddr string) (*JobManager, error) {
 	parsed, err := abi.JSON(strings.NewReader(OracleWriteABI))
 	if err != nil {
 		return nil, err
 	}
 
 	return &JobManager{
-		jobQueue:   make(chan JobRequest, 100),
+		JobQueue:   make(chan oracle.JobRequest, 100),
 		adapters:   am,
 		txMgr:      txMgr,
 		vrfMgr:     vrfMgr,
 		repMgr:     repMgr,
+		computeMgr: cm,
 		oracleAddr: common.HexToAddress(contractAddr),
 		oracleABI:  parsed,
 	}, nil
 }
 
-// SubmitJob adds a job to the processing queue
-func (jm *JobManager) SubmitJob(job JobRequest) {
-	jm.mu.Lock()
-	defer jm.mu.Unlock()
-	jm.jobQueue <- job
+// Dispatch adds a job to the queue
+func (jm *JobManager) Dispatch(job oracle.JobRequest) {
+	jm.JobQueue <- job
 	log.Info().Str("job_id", job.ID).Str("type", string(job.Type)).Msg("Job submitted")
 }
 
@@ -91,26 +75,28 @@ func (jm *JobManager) Start(ctx context.Context) {
 		case <-ctx.Done():
 			log.Info().Msg("Job Manager stopping")
 			return
-		case job := <-jm.jobQueue:
+		case job := <-jm.JobQueue:
 			go jm.processJob(ctx, job) // Process in goroutine for concurrency
 		}
 	}
 }
 
-func (jm *JobManager) processJob(ctx context.Context, job JobRequest) {
-	log.Info().Str("job_id", job.ID).Msg("Processing job")
+func (jm *JobManager) processJob(ctx context.Context, job oracle.JobRequest) {
+	log.Info().Str("job_id", job.ID).Str("type", string(job.Type)).Msg("Processing Job")
 	
 	switch job.Type {
-	case JobTypeDataFeed:
+	case oracle.JobTypeDataFeed:
 		jm.handleDataFeed(ctx, job)
-	case JobTypeVRF:
+	case oracle.JobTypeVRF:
 		jm.handleVRF(ctx, job)
+	case oracle.JobTypeCompute:
+		jm.handleCompute(ctx, job)
 	default:
 		log.Warn().Str("type", string(job.Type)).Msg("Unknown job type")
 	}
 }
 
-func (jm *JobManager) handleDataFeed(ctx context.Context, job JobRequest) {
+func (jm *JobManager) handleDataFeed(ctx context.Context, job oracle.JobRequest) {
 	// 1. Fetch Data
 	url, _ := job.Params["url"].(string)
 	
@@ -124,7 +110,7 @@ func (jm *JobManager) handleDataFeed(ctx context.Context, job JobRequest) {
 	result, err := jm.adapters.Fetch(req)
 	if err != nil {
 		log.Error().Err(err).Str("job_id", job.ID).Msg("Failed to fetch external data")
-		jm.repMgr.UpdateReputation("self", -1.0) // Local penalty
+		jm.repMgr.UpdateReputation("self", -1.0)
 		return
 	}
 
@@ -136,31 +122,32 @@ func (jm *JobManager) handleDataFeed(ctx context.Context, job JobRequest) {
 		return 
 	}
 	
-	valueBig := new(big.Int).SetInt64(int64(valFloat * 100)) 
+	// Standardizing to 8 decimal places for price feeds
+	valInt := new(big.Int).SetUint64(uint64(valFloat * 1e8))
 	
-	// 2. Generate ZKP
-	minBin, _ := job.Params["min"].(*big.Int)
-	maxBin, _ := job.Params["max"].(*big.Int)
-	if minBin == nil { minBin = big.NewInt(0) }
-	if maxBin == nil { maxBin = new(big.Int).Set(valueBig).Add(valueBig, big.NewInt(1000)) }
+	// 2. Generate ZK Proof
+	log.Info().Str("job_id", job.ID).Msg("Generating Zero-Knowledge Range Proof")
+	
+	// Range verification: value ± 10% or similar. For demo/MVP using hardcoded range or job params.
+	minInt, _ := job.Params["min"].(*big.Int)
+	maxInt, _ := job.Params["max"].(*big.Int)
+	if minInt == nil { minInt = new(big.Int).Sub(valInt, big.NewInt(1000000)) }
+	if maxInt == nil { maxInt = new(big.Int).Add(valInt, big.NewInt(1000000)) }
 
-	proof, err := zkp.GenerateProof(valueBig, minBin, maxBin)
+	proof, err := zkp.GenerateRangeProof(valInt, minInt, maxInt)
 	if err != nil {
-		log.Error().Err(err).Msg("ZKP Generation failed")
+		log.Error().Err(err).Msg("ZK Proof Generation failed")
 		return
 	}
 
-	serializedProof, err := zkp.SerializeProof(proof)
+	serialized, err := zkp.SerializeProof(proof)
 	if err != nil {
-		log.Error().Err(err).Msg("ZKP Serialization failed")
+		log.Error().Err(err).Msg("Proof serialization failed")
 		return
 	}
 
-	// Public inputs: Min, Max
-	pubInputs := [2]*big.Int{minBin, maxBin}
-	
-	// 3. Submit Transaction
-	jm.submitFulfillment(ctx, job.ID, valueBig, serializedProof, pubInputs)
+	// 3. Submit to Blockchain
+	jm.submitFulfillment(ctx, job.ID, valInt, serialized, [2]*big.Int{minInt, maxInt})
 }
 
 func (jm *JobManager) submitFulfillment(ctx context.Context, jobIDStr string, value *big.Int, proof [8]*big.Int, pubInputs [2]*big.Int) {
@@ -184,7 +171,7 @@ func (jm *JobManager) submitFulfillment(ctx context.Context, jobIDStr string, va
 	log.Info().Str("tx_hash", txHash.Hex()).Msg("Fulfillment Transaction Sent")
 }
 
-func (jm *JobManager) handleVRF(ctx context.Context, job JobRequest) {
+func (jm *JobManager) handleVRF(ctx context.Context, job oracle.JobRequest) {
 	seed, _ := job.Params["seed"].(string)
 	
 	valStr, proofStr, err := jm.vrfMgr.GenerateRandomness(seed)
@@ -214,4 +201,27 @@ func (jm *JobManager) handleVRF(ctx context.Context, job JobRequest) {
 	}
 
 	log.Info().Str("tx_hash", txHash.Hex()).Msg("VRF Fulfillment Sent")
+}
+
+func (jm *JobManager) handleCompute(ctx context.Context, job oracle.JobRequest) {
+	wasmBytes, _ := job.Params["wasm"].([]byte)
+	funcName, _ := job.Params["function"].(string)
+	
+	// Execute WASM
+	results, err := jm.computeMgr.ExecuteWasm(ctx, wasmBytes, funcName, nil)
+	if err != nil {
+		log.Error().Err(err).Msg("WASM Execution failed")
+		return
+	}
+
+	if len(results) == 0 {
+		log.Error().Msg("WASM execution returned no results")
+		return
+	}
+
+	valInt := new(big.Int).SetUint64(results[0])
+	
+	// For compute, we might skip ZK or use a specialized circuit. 
+	// For now, simple fulfillment.
+	jm.submitFulfillment(ctx, job.ID, valInt, [8]*big.Int{}, [2]*big.Int{})
 }

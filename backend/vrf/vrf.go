@@ -40,55 +40,65 @@ func NewRandomnessManager(pkHex string) *RandomnessManager {
 	}
 }
 
-// GenerateRandomness produces a random number and a proof (ECDSA signature)
-// It signs keccak256(seed + timestamp) to ensure uniqueness
+// GenerateRandomness produces a deterministic random number and a proof from a seed.
+// This implementation uses RFC 6979 deterministic signatures (provided by libsecp256k1 via Geth)
+// to ensure that for a given seed and private key, exactly one valid signature/random-value exists.
 func (rm *RandomnessManager) GenerateRandomness(seed string) (string, string, error) {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
-	log.Info().Str("seed", seed).Msg("Generating VRF Proof")
-
-	// 1. Construct the payload to sign (simulating the contract's expectation)
-	// For full correctness, this must exactly match the logic in the contract's requestSeeds calculation
-	// Since backend doesn't see msg.sender here easily without more context, we simplify:
-	// We sign the seed itself as the source of randomness.
-	
+	// 1. Prepare entropy from seed
+	// We hash the seed to ensure we have a standard 32-byte input
 	seedHash := crypto.Keccak256Hash([]byte(seed))
 	
-	// 2. Sign the hash
-    // Note: The signature itself acts as the "randomness proof" because it's unique, deterministic (for a unique seed), and verifiable.
+	// 2. Generate the deterministic signature
+	// The crypto.Sign function in Geth uses secp256k1 which is deterministic by default.
 	signature, err := crypto.Sign(seedHash.Bytes(), rm.privateKey)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to sign VRF payload: %w", err)
+		log.Error().Err(err).Msg("VRF signature generation failed")
+		return "", "", fmt.Errorf("cryptographic failure: %w", err)
 	}
 
-    // 3. Convert signature to a big integer to serve as the "Random Value"
-    // In many VRF implementations (like Chainlink), the signature digest IS the random output.
-    randomInt := new(big.Int).SetBytes(crypto.Keccak256(signature))
+	// 3. Derive the Random Value from the signature
+	// We hash the signature to produce the final VRF output.
+	// This ensures the value is indistinguishable from random data to anyone without the private key.
+	randomValue := crypto.Keccak256Hash(signature)
+	randomInt := new(big.Int).SetBytes(randomValue.Bytes())
+
+	log.Info().
+		Str("seed", seed).
+		Str("random_val", randomInt.String()[:10]+"...").
+		Msg("Deterministic VRF output generated")
 
 	return randomInt.String(), hex.EncodeToString(signature), nil
 }
 
-// VerifyRandomness checks if the signature matches the public key (Local check)
+// VerifyRandomness performs a local verification of the VRF output.
 func (rm *RandomnessManager) VerifyRandomness(seed, proofHex, value string) bool {
-    // Decode proof
-    sig, err := hex.DecodeString(proofHex)
-    if err != nil {
-        return false
-    }
-    
-    // Hash seed
-    seedHash := crypto.Keccak256Hash([]byte(seed))
-    
-    // Recover Public Key
-    pubKeyBytes, err := crypto.Ecrecover(seedHash.Bytes(), sig)
-    if err != nil {
-        return false
-    }
-    
-    // Check if it matches our public key
-    // In prod: check against on-chain registered oracle key
-    // For now, we assume self-verification
-    derivedPub, _ := crypto.UnmarshalPubkey(pubKeyBytes)
-    return derivedPub.X.Cmp(rm.privateKey.PublicKey.X) == 0 && derivedPub.Y.Cmp(rm.privateKey.PublicKey.Y) == 0
+	sig, err := hex.DecodeString(proofHex)
+	if err != nil {
+		return false
+	}
+
+	seedHash := crypto.Keccak256Hash([]byte(seed))
+	
+	// Recover the public key from the signature to prove the source
+	pubKey, err := crypto.SigToPub(seedHash.Bytes(), sig)
+	if err != nil {
+		return false
+	}
+
+	// Assert the public key matches the manager's authorized key
+	if crypto.PubkeyToAddress(*pubKey) != crypto.PubkeyToAddress(rm.privateKey.PublicKey) {
+		return false
+	}
+
+	// Verify the hash of the signature matches the provided value
+	expectedValue := crypto.Keccak256Hash(sig)
+	providedValue, ok := new(big.Int).SetString(value, 10)
+	if !ok {
+		return false
+	}
+
+	return expectedValue.Big().Cmp(providedValue) == 0
 }

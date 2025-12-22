@@ -15,7 +15,7 @@ COPY . .
 
 # Build the node binary
 # Enable CGO if using wasmtime-go, otherwise CGO_ENABLED=0 for wazero
-RUN CGO_ENABLED=0 GOOS=linux go build -o obscura-node ./cmd/node
+RUN CGO_ENABLED=0 GOOS=linux go build -o obscura-node ./cmd/obscura
 
 # Final Stage
 FROM alpine:3.19

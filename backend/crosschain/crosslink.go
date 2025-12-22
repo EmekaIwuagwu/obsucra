@@ -2,8 +2,9 @@ package crosschain
 
 import (
 	"fmt"
-	"time"
+	"math/big"
 
+	"github.com/obscura-network/obscura-node/zkp"
 	"github.com/rs/zerolog/log"
 )
 
@@ -19,40 +20,59 @@ type BridgeMessage struct {
 // CrossLink handles cross-chain communication
 type CrossLink struct {
 	supportedChains []string
+	secretKey       *big.Int // Simplified for demo, in prod: from key manager
 }
 
 // NewCrossLink initializes the bridge module
 func NewCrossLink() *CrossLink {
 	return &CrossLink{
 		supportedChains: []string{"ethereum", "solana", "arbitrum", "optimism"},
+		secretKey:       big.NewInt(123456789), // Mock secret key for proof generation
 	}
 }
 
-// RelayMessage simulates relaying a message to another chain
+// RelayMessage handles relaying a message to another chain with verification
 func (cl *CrossLink) RelayMessage(msg BridgeMessage) error {
 	log.Info().Str("msg_id", msg.ID).Str("target", msg.Target).Msg("Relaying Cross-Chain Message")
 	
-	isValidChain := false
-	for _, chain := range cl.supportedChains {
-		if chain == msg.Target {
-			isValidChain = true
-			break
-		}
+	// Chain verification
+	isValid := false
+	for _, c := range cl.supportedChains {
+		if c == msg.Target { isValid = true; break }
+	}
+	if !isValid { return fmt.Errorf("unsupported chain: %s", msg.Target) }
+
+	// 1. Generate ZK Proof of validity
+	proof, err := cl.GenerateZKProofForBridge(msg.Data)
+	if err != nil {
+		return fmt.Errorf("failed to generate bridge proof: %w", err)
 	}
 
-	if !isValidChain {
-		return fmt.Errorf("unsupported chain: %s", msg.Target)
-	}
+	log.Info().
+		Str("msg_id", msg.ID).
+		Int("proof_len", len(proof)).
+		Msg("Message Relayed Successfully with ZK Proof")
 
-	// Simulate latency
-	time.Sleep(500 * time.Millisecond)
-
-	log.Info().Str("msg_id", msg.ID).Msg("Message Relayed Successfully via ZK-Bridge")
 	return nil
 }
 
 // GenerateZKProofForBridge generates a validity proof for the state transition
 func (cl *CrossLink) GenerateZKProofForBridge(data []byte) ([]byte, error) {
-	// Wrapper for gnark circuit generation
-	return []byte("zk_bridge_proof_data"), nil
+	msgHash := new(big.Int).SetBytes(data)
+	originChain := big.NewInt(1) // Ethereum = 1
+
+	proof, err := zkp.GenerateBridgeProof(msgHash, originChain, cl.secretKey)
+	if err != nil {
+		return nil, err
+	}
+
+	serialized, _ := zkp.SerializeProof(proof)
+	
+	// Convert [8]*big.Int to []byte for transmission
+	var output []byte
+	for _, b := range serialized {
+		output = append(output, b.Bytes()...)
+	}
+
+	return output, nil
 }

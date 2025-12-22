@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  node:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - ETHEREUM_URL=http://host.docker.internal:8545
+      - ORACLE_CONTRACT_ADDRESS=${ORACLE_ADDR}
+      - PRIVATE_KEY=${NODE_PK}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
