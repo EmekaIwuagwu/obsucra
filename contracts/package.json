@@ -1,0 +1,20 @@
+{
+  "name": "obscura-contracts",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Smart Contracts for the Obscura Privacy Oracle Mesh",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx hardhat test",
+    "deploy": "npx hardhat run scripts/deploy.js",
+    "compile": "npx hardhat compile"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "ethers": "^6.16.0",
+    "hardhat": "^2.22.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.0"
+  }
+}
