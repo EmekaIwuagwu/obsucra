@@ -11,7 +11,7 @@ const NetworkDashboard: React.FC = () => {
         { id: 'opt', name: 'Optimism', tps: '32.1', height: '87,654,321', status: 'Congested' },
     ]);
 
-    const [recentJobs, setRecentJobs] = useState([
+    const [recentJobs] = useState([
         { id: 'job-1234', type: 'Price Feed', target: 'ETH/USD', status: 'Fulfilled', hash: '0xabc...123' },
         { id: 'job-1235', type: 'VRF Request', target: 'GameFi Contract', status: 'Pending', hash: '0xdef...456' },
         { id: 'job-1236', type: 'ZK Proof', target: 'Private Identity', status: 'Verifying', hash: '0x789...xyz' },

@@ -1,6 +1,6 @@
 import React, { useRef, useMemo } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Stars, Html } from '@react-three/drei';
+import { OrbitControls, Stars } from '@react-three/drei';
 import { motion } from 'framer-motion';
 import * as THREE from 'three';
 import Logo from './Logo'; // Updated import
@@ -11,7 +11,7 @@ import Footer from './Footer';
 const Globe = () => {
     const meshRef = useRef<THREE.Mesh>(null);
 
-    useFrame((state, delta) => {
+    useFrame((_: any, delta: number) => {
         if (meshRef.current) {
             meshRef.current.rotation.y += delta * 0.05;
         }
@@ -67,7 +67,7 @@ const DataFlow = () => {
     const particlesRef = useRef<THREE.Points>(null);
     const particleCount = 200;
 
-    const [positions, speeds] = useMemo(() => {
+    const [positions] = useMemo(() => {
         const pos = new Float32Array(particleCount * 3);
         const spd = new Float32Array(particleCount);
         for (let i = 0; i < particleCount; i++) {
