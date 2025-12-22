@@ -9,12 +9,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/obscura-network/obscura-node/adapters"
-	"github.com/obscura-network/obscura-node/ai"
-	"github.com/obscura-network/obscura-node/security"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
+
+	"github.com/obscura-network/obscura-node/adapters"
+	"github.com/obscura-network/obscura-node/ai"
+	"github.com/obscura-network/obscura-node/security"
+	"github.com/obscura-network/obscura-node/storage"
 )
 
 // Config holds the configuration for the Obscura Node
@@ -24,6 +26,7 @@ type Config struct {
 	EthereumURL   string `mapstructure:"ethereum_url"`
 	PrivateKey    string `mapstructure:"private_key"`
 	TelemetryMode bool   `mapstructure:"telemetry_mode"`
+	DBPath        string `mapstructure:"db_path"`
 }
 
 // Node represents the core Obscura Node structure
@@ -34,6 +37,8 @@ type Node struct {
 	AIModel    *ai.PredictiveModel
 	Adapters   *adapters.AdapterManager
 	Security   *security.ReputationManager
+	Storage    storage.Store
+	Listener   *EventListener
 }
 
 // NewNode initializes a new Obscura Node
@@ -53,6 +58,7 @@ func NewNode() (*Node, error) {
 	viper.SetDefault("port", "8080")
 	viper.SetDefault("log_level", "info")
 	viper.SetDefault("telemetry_mode", true)
+	viper.SetDefault("db_path", "./node.db.json")
 
 	if err := viper.ReadInConfig(); err != nil {
 		logger.Warn().Err(err).Msg("Config file not found, using defaults/environment variables")
@@ -68,11 +74,18 @@ func NewNode() (*Node, error) {
 		zerolog.SetGlobalLevel(level)
 	}
 
+	// Initialize Storage
+	store, err := storage.NewFileStore(viper.GetString("db_path"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to init storage: %w", err)
+	}
+
 	// Initialize Components
 	jobMgr := NewJobManager()
 	aiModel := ai.NewPredictiveModel()
 	adapterMgr := adapters.NewAdapterManager()
 	secMgr := security.NewReputationManager()
+	listener := NewEventListener(jobMgr, cfg.EthereumURL)
 
 	return &Node{
 		Config:     cfg,
@@ -81,6 +94,8 @@ func NewNode() (*Node, error) {
 		AIModel:    aiModel,
 		Adapters:   adapterMgr,
 		Security:   secMgr,
+		Storage:    store,
+		Listener:   listener,
 	}, nil
 }
 
@@ -105,6 +120,13 @@ func (n *Node) Run() error {
 	go func() {
 		defer wg.Done()
 		n.AIModel.RunTrainingLoop(ctx)
+	}()
+
+	// Start Event Listener
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		n.Listener.Start(ctx)
 	}()
 
 	// Start API Server (Placeholder)

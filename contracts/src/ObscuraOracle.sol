@@ -70,6 +70,9 @@ contract ObscuraOracle is Ownable, ReentrancyGuard {
     }
 
     // Fulfill with ZK Proof
+    mapping(address => uint256) public nodeBalances;
+
+    // Fulfill with ZK Proof
     function fulfillDataZK(
         uint256 _requestId,
         uint256 _value,
@@ -89,9 +92,19 @@ contract ObscuraOracle is Ownable, ReentrancyGuard {
         req.value = _value;
         req.resolved = true;
         
+        // Credit the Node
+        nodeBalances[msg.sender] += fee;
+
         emit DataFulfilled(_requestId, _value, msg.sender);
         emit RequestResolved(_requestId, _value);
+    }
+
+    function withdraw() external nonReentrant {
+        uint256 amount = nodeBalances[msg.sender];
+        require(amount > 0, "No funds to withdraw");
         
-        // Payout logic would go here
+        nodeBalances[msg.sender] = 0;
+        (bool success, ) = payable(msg.sender).call{value: amount}("");
+        require(success, "Transfer failed");
     }
 }

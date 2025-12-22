@@ -26,6 +26,27 @@ func (circuit *DataPrivacyCircuit) Define(api frontend.API) error {
 	return nil
 }
 
+// AggregationCircuit proves that 'Average' is the arithmetic mean of 'Values'
+type AggregationCircuit struct {
+    Values [5]frontend.Variable `gnark:",secret"` // Fixed size for prototype
+    Average frontend.Variable   `gnark:",public"`
+}
+
+func (circuit *AggregationCircuit) Define(api frontend.API) error {
+    sum := frontend.Variable(0)
+    for i := 0; i < len(circuit.Values); i++ {
+        sum = api.Add(sum, circuit.Values[i])
+    }
+    
+    // Average * N == Sum
+    // We avoid division in circuits, we use multiplication check
+	n := frontend.Variable(len(circuit.Values))
+    calcSum := api.Mul(circuit.Average, n)
+    
+    api.AssertIsEqual(sum, calcSum)
+    return nil
+}
+
 var (
 	groth16PK groth16.ProvingKey
 	groth16VK groth16.VerifyingKey
