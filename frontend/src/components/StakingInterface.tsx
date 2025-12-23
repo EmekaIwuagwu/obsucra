@@ -1,7 +1,24 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { ObscuraSDK } from '../sdk/obscura';
 
 const StakingInterface: React.FC = () => {
+    const [stats, setStats] = useState<any>(null);
+
+    useEffect(() => {
+        const sdk = new ObscuraSDK();
+        const fetchStats = async () => {
+            try {
+                const data = await sdk.getNetworkStats();
+                setStats(data);
+            } catch (err) {
+                console.error("Failed to fetch staking stats:", err);
+            }
+        };
+        fetchStats();
+        const interval = setInterval(fetchStats, 5000);
+        return () => clearInterval(interval);
+    }, []);
     return (
         <div className="p-8 max-w-6xl mx-auto">
             <h2 className="text-4xl font-bold mb-12 text-center text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500 text-glow-gold">
@@ -28,7 +45,9 @@ const StakingInterface: React.FC = () => {
                     >
                         <div className="text-center">
                             <div className="text-xs text-[#FFD700] uppercase tracking-widest mb-1">Total Staked</div>
-                            <div className="text-4xl font-mono text-white">42.8M</div>
+                            <div className="text-4xl font-mono text-white">
+                                {stats ? (stats.total_staked / 1000000).toFixed(1) + 'M' : '0.0M'}
+                            </div>
                             <div className="text-sm text-gray-400">OBS</div>
                         </div>
                     </motion.div>

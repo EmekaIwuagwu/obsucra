@@ -1,12 +1,25 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { ObscuraSDK } from '../sdk/obscura';
 
 const Governance: React.FC = () => {
-    const proposals = [
-        { id: 1, title: 'OIP-12: Increase Slash Penalty', votesFor: 65, votesAgainst: 35, status: 'Active' },
-        { id: 2, title: 'OIP-13: Add Solana Support', votesFor: 92, votesAgainst: 8, status: 'Active' },
-        { id: 3, title: 'OIP-14: Reduce Min Stake', votesFor: 45, votesAgainst: 55, status: 'Ending Soon' },
-    ];
+    const [proposals, setProposals] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const sdk = new ObscuraSDK();
+        const fetchProposals = async () => {
+            try {
+                const data = await sdk.getProposals();
+                setProposals(data);
+            } catch (err) {
+                console.error("Failed to fetch proposals:", err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchProposals();
+    }, []);
 
     return (
         <div className="p-8 max-w-4xl mx-auto">
@@ -15,7 +28,12 @@ const Governance: React.FC = () => {
             </h2>
 
             <div className="space-y-6">
-                {proposals.map((prop) => (
+                {loading && (
+                    <div className="flex justify-center p-20">
+                        <div className="w-8 h-8 border-4 border-[#4f46e5]/20 border-t-indigo-500 rounded-full animate-spin" />
+                    </div>
+                )}
+                {!loading && proposals.map((prop) => (
                     <motion.div
                         key={prop.id}
                         initial={{ x: -20, opacity: 0 }}
@@ -33,12 +51,12 @@ const Governance: React.FC = () => {
                             <div>
                                 <div className="flex justify-between text-xs text-gray-400 mb-1">
                                     <span>For</span>
-                                    <span>{prop.votesFor}%</span>
+                                    <span>{prop.votes_for}%</span>
                                 </div>
                                 <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
                                     <motion.div
                                         initial={{ width: 0 }}
-                                        animate={{ width: `${prop.votesFor}%` }}
+                                        animate={{ width: `${prop.votes_for}%` }}
                                         transition={{ duration: 1, delay: 0.2 }}
                                         className="h-full bg-gradient-to-r from-green-400 to-green-600 shadow-[0_0_10px_#4ade80]"
                                     />
@@ -48,12 +66,12 @@ const Governance: React.FC = () => {
                             <div>
                                 <div className="flex justify-between text-xs text-gray-400 mb-1">
                                     <span>Against</span>
-                                    <span>{prop.votesAgainst}%</span>
+                                    <span>{prop.votes_against}%</span>
                                 </div>
                                 <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
                                     <motion.div
                                         initial={{ width: 0 }}
-                                        animate={{ width: `${prop.votesAgainst}%` }}
+                                        animate={{ width: `${prop.votes_against}%` }}
                                         transition={{ duration: 1, delay: 0.2 }}
                                         className="h-full bg-gradient-to-r from-red-400 to-red-600 shadow-[0_0_10px_#f87171]"
                                     />

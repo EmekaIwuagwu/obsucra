@@ -127,11 +127,13 @@ func NewJobPersistence(store storage.Store) *JobPersistence {
 func (jp *JobPersistence) SavePendingJob(job oracle.JobRequest) error {
 	key := fmt.Sprintf("pending_job_%s", job.ID)
 	return jp.store.SaveJob(key, map[string]interface{}{
-		"id":        job.ID,
-		"type":      string(job.Type),
-		"params":    job.Params,
-		"requester": job.Requester,
-		"timestamp": job.Timestamp.Unix(),
+		"id":              job.ID,
+		"type":            string(job.Type),
+		"params":          job.Params,
+		"requester":       job.Requester,
+		"timestamp":       job.Timestamp.Unix(),
+		"oev_enabled":     job.OEVEnabled,
+		"oev_beneficiary": job.OEVBeneficiary,
 	})
 }
 
@@ -160,13 +162,17 @@ func (jp *JobPersistence) LoadPendingJobs() ([]oracle.JobRequest, error) {
 		params, _ := m["params"].(map[string]interface{})
 		requester, _ := m["requester"].(string)
 		ts, _ := m["timestamp"].(float64)
+		oevEnabled, _ := m["oev_enabled"].(bool)
+		oevBeneficiary, _ := m["oev_beneficiary"].(string)
 
 		jobs = append(jobs, oracle.JobRequest{
-			ID:        id,
-			Type:      oracle.JobType(jobType),
-			Params:    params,
-			Requester: requester,
-			Timestamp: time.Unix(int64(ts), 0),
+			ID:             id,
+			Type:           oracle.JobType(jobType),
+			Params:         params,
+			Requester:      requester,
+			Timestamp:      time.Unix(int64(ts), 0),
+			OEVEnabled:     oevEnabled,
+			OEVBeneficiary: oevBeneficiary,
 		})
 	}
 	

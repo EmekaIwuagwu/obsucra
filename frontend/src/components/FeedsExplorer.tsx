@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ObscuraSDK } from '../sdk/obscura';
 
 interface Feed {
     id: string;
@@ -8,19 +9,53 @@ interface Feed {
     confidence: number;
     updated: string;
     isZk: boolean;
+    isOptimistic?: boolean;
+    challengeDeadline?: number; // timestamp
     roundId: number;
     timestamp: string;
 }
 
-const mockFeeds: Feed[] = [
-    { id: '1', pair: 'BTC/USD', value: '$98,450.22', confidence: 99.9, updated: '2s ago', isZk: true, roundId: 1042, timestamp: "2025-12-23 08:30:12" },
-    { id: '2', pair: 'ETH/USD', value: '$3,892.15', confidence: 99.5, updated: '5s ago', isZk: true, roundId: 8521, timestamp: "2025-12-23 08:31:05" },
-    { id: '3', pair: 'SOL/USD', value: '$145.80', confidence: 98.2, updated: '12s ago', isZk: false, roundId: 442, timestamp: "2025-12-23 08:29:45" },
-    { id: '4', pair: 'LINK/USD', value: '$22.45', confidence: 99.1, updated: '1s ago', isZk: true, roundId: 120, timestamp: "2025-12-23 08:31:22" },
-];
+
+import { ShieldCheck, Zap, Timer, AlertCircle } from 'lucide-react';
 
 const FeedsExplorer: React.FC = () => {
     const [obscuraMode, setObscuraMode] = useState(false);
+    const [feeds, setFeeds] = useState<Feed[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const sdk = new ObscuraSDK();
+        const fetchFeeds = async () => {
+            try {
+                const data = await sdk.getFeeds();
+                if (data && data.length > 0) {
+                    setFeeds(data.map((f: any) => ({
+                        id: f.id,
+                        pair: f.id,
+                        value: f.value,
+                        confidence: f.confidence,
+                        updated: 'Just now',
+                        isZk: f.is_zk,
+                        isOptimistic: f.is_optimistic,
+                        roundId: f.round_id,
+                        timestamp: new Date(f.timestamp).toLocaleString(),
+                        confidenceInterval: f.confidence_interval
+                    })));
+                } else {
+                    setFeeds([]);
+                }
+            } catch (err) {
+                console.error("Failed to fetch feeds:", err);
+                setFeeds([]);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchFeeds();
+        const interval = setInterval(fetchFeeds, 5000);
+        return () => clearInterval(interval);
+    }, []);
 
     return (
         <div className="p-8">
@@ -49,8 +84,13 @@ const FeedsExplorer: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {loading && (
+                    <div className="col-span-full h-64 flex items-center justify-center">
+                        <div className="w-12 h-12 border-4 border-[#00FFFF]/20 border-t-[#00FFFF] rounded-full animate-spin" />
+                    </div>
+                )}
                 <AnimatePresence>
-                    {mockFeeds.map((feed) => (
+                    {!loading && feeds.map((feed) => (
                         <motion.div
                             key={feed.id}
                             initial={{ opacity: 0, scale: 0.9 }}
@@ -64,9 +104,19 @@ const FeedsExplorer: React.FC = () => {
                                 </h3>
                                 <div className="flex flex-col items-end gap-1">
                                     {feed.isZk && (
-                                        <span className="bg-cyan-900/40 border border-cyan-500/50 text-cyan-200 text-[10px] px-2 py-0.5 rounded-full font-bold">
-                                            ZK-VERIFIED
+                                        <span className="bg-cyan-900/40 border border-cyan-500/50 text-cyan-200 text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shadow-[0_0_10px_rgba(0,255,255,0.2)]">
+                                            <ShieldCheck size={10} /> ZK-SECURED
                                         </span>
+                                    )}
+                                    {feed.isOptimistic && (
+                                        <div className="flex flex-col items-end gap-1">
+                                            <span className="bg-yellow-900/40 border border-yellow-500/50 text-yellow-200 text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                                                <Zap size={10} /> OPTIMISTIC MODE
+                                            </span>
+                                            <div className="flex items-center gap-1 text-[9px] text-yellow-500 font-mono animate-pulse">
+                                                <Timer size={10} /> IN DISPUTE WINDOW
+                                            </div>
+                                        </div>
                                     )}
                                     <span className="text-[10px] text-gray-500 font-mono">ID: {feed.id}</span>
                                 </div>
@@ -95,9 +145,19 @@ const FeedsExplorer: React.FC = () => {
                                 )}
 
                                 <div className="flex items-center gap-2">
-                                    <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
-                                    <span className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">Consensus Reached</span>
+                                    <div className={`h-1.5 w-1.5 rounded-full ${feed.isOptimistic ? 'bg-yellow-500' : 'bg-green-500'} animate-pulse`} />
+                                    <span className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">
+                                        {feed.isOptimistic ? 'Awaiting Finality' : 'Consensus Reached'}
+                                    </span>
                                 </div>
+                                {feed.isOptimistic && (
+                                    <div className="mt-4 p-3 bg-yellow-500/5 border border-yellow-500/10 rounded-lg flex items-center gap-2">
+                                        <AlertCircle size={14} className="text-yellow-500" />
+                                        <span className="text-[10px] text-yellow-500 leading-tight">
+                                            This value is posted optimistically. It can be challenged for the next 20 mins.
+                                        </span>
+                                    </div>
+                                )}
                             </div>
 
                             {/* New: Round Data Details (Reflecting Smart Contract changes) */}
@@ -126,6 +186,11 @@ const FeedsExplorer: React.FC = () => {
                             <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#00FFFF] to-transparent opacity-20 group-hover:opacity-100 transition-opacity" />
                         </motion.div>
                     ))}
+                    {!loading && feeds.length === 0 && (
+                        <div className="col-span-full text-center py-20 text-gray-500 uppercase tracking-widest text-sm">
+                            No Active Data Feeds Found
+                        </div>
+                    )}
                 </AnimatePresence>
             </div>
         </div>

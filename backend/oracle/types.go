@@ -13,9 +13,12 @@ const (
 
 // JobRequest represents an incoming oracle request
 type JobRequest struct {
-	ID        string
-	Type      JobType
-	Params    map[string]interface{}
-	Requester string
-	Timestamp time.Time
+	ID             string
+	Type           JobType
+	Params         map[string]interface{}
+	Requester      string
+	Timestamp      time.Time
+	OEVEnabled     bool
+	OEVBeneficiary string
+	IsOptimistic   bool
 }

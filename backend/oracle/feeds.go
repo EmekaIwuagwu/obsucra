@@ -32,16 +32,31 @@ type DataSource struct {
 	Timeout time.Duration
 }
 
+// FeedLiveStatus tracks the current state and statistics of a feed
+type FeedLiveStatus struct {
+	ID                 string    `json:"id"`
+	Value              string    `json:"value"`
+	Confidence         float64   `json:"confidence"`
+	Outliers           int       `json:"outliers"`
+	RoundID            uint64    `json:"round_id"`
+	Timestamp          time.Time `json:"timestamp"`
+	IsZK               bool      `json:"is_zk"`
+	IsOptimistic       bool      `json:"is_optimistic"`
+	ConfidenceInterval string    `json:"confidence_interval"` // e.g. "± 1.2%"
+}
+
 // FeedManager manages feed configurations and lifecycle
 type FeedManager struct {
-	feeds map[string]*FeedConfig
-	mu    sync.RWMutex
+	feeds      map[string]*FeedConfig
+	liveStatus map[string]*FeedLiveStatus
+	mu         sync.RWMutex
 }
 
 // NewFeedManager creates a new feed configuration manager
 func NewFeedManager() *FeedManager {
 	return &FeedManager{
-		feeds: make(map[string]*FeedConfig),
+		feeds:      make(map[string]*FeedConfig),
+		liveStatus: make(map[string]*FeedLiveStatus),
 	}
 }
 
@@ -91,4 +106,26 @@ func (fm *FeedManager) DeactivateFeed(id string) {
 		feed.Active = false
 		feed.UpdatedAt = time.Now()
 	}
+}
+
+// UpdateFeedValue updates the live tracking for a feed
+func (fm *FeedManager) UpdateFeedValue(status FeedLiveStatus) {
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	
+	fm.liveStatus[status.ID] = &status
+}
+
+// GetLiveStatus returns the current live data for all active feeds
+func (fm *FeedManager) GetLiveStatus() []FeedLiveStatus {
+	fm.mu.RLock()
+	defer fm.mu.RUnlock()
+	
+	var status []FeedLiveStatus
+	for id, s := range fm.liveStatus {
+		if feed, ok := fm.feeds[id]; ok && feed.Active {
+			status = append(status, *s)
+		}
+	}
+	return status
 }

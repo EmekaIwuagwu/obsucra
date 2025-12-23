@@ -54,7 +54,12 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         uint256 id;
         string apiUrl;
         address requester;
-        bool resolved;
+        address oevBeneficiary; // The address that receives the MEV kickback
+        bool oevEnabled;        // Whether this request is an OEV-positive request
+        bool isOptimistic;     // True if fulfilled without ZK proof first
+        uint256 challengeWindow;// Timestamp until which the result can be disputed
+        address disputer;       // Address of the challenger
+        bool isDisputed;        // Status of the dispute
         uint256 finalValue;
         uint256 createdAt;
         uint256 minThreshold;
@@ -64,13 +69,30 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         mapping(address => bool) hasResponded;
     }
 
+    mapping(address => uint256) public oevEarnings; 
+    uint256 public constant DISPUTE_BOND = 100 * 1e18; // 100 OBS tokens to dispute
+    uint256 public constant CHALLENGE_PERIOD = 30 minutes;
+
     uint256 public nextRequestId;
     mapping(uint256 => Request) public requests;
 
-    event RequestData(uint256 indexed requestId, string apiUrl, uint256 min, uint256 max, address indexed requester);
+    event RequestData(
+        uint256 indexed requestId, 
+        string apiUrl, 
+        uint256 min, 
+        uint256 max, 
+        address indexed requester,
+        bool oevEnabled,
+        address oevBeneficiary,
+        bool isOptimistic
+    );
     event DataSubmitted(uint256 indexed requestId, address indexed node, uint256 value);
     event RequestFulfilled(uint256 indexed requestId, uint256 finalValue);
     event NewRound(uint80 indexed roundId, int256 answer, uint256 updatedAt);
+    event OEVCaptured(uint256 indexed requestId, address indexed beneficiary, uint256 amount);
+    event OptimisticFulfillment(uint256 indexed requestId, uint256 value, uint256 deadline);
+    event ChallengeRaised(uint256 indexed requestId, address indexed challenger, uint256 bond);
+    event DisputeResolved(uint256 indexed requestId, bool success);
     
     event RandomnessRequested(uint256 indexed requestId, string seed, address indexed requester);
     event RandomnessFulfilled(uint256 indexed requestId, uint256 randomness);
@@ -132,6 +154,32 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         uint256 max, 
         string calldata metadata
     ) external whenNotPaused nonReentrant returns (uint256) {
+        return _requestDataInternal(apiUrl, min, max, metadata, address(0), false);
+    }
+
+    /**
+     * @notice OEV-Positive Request: Allows protocols to recapture MEV
+     * @param beneficiary The treasury or contract to receive recaptured OEV
+     */
+    function requestDataOEV(
+        string calldata apiUrl,
+        uint256 min,
+        uint256 max,
+        string calldata metadata,
+        address beneficiary
+    ) external whenNotPaused nonReentrant returns (uint256) {
+        require(beneficiary != address(0), "Invalid OEV beneficiary");
+        return _requestDataInternal(apiUrl, min, max, metadata, beneficiary, true);
+    }
+
+    function _requestDataInternal(
+        string calldata apiUrl,
+        uint256 min,
+        uint256 max,
+        string calldata metadata,
+        address beneficiary,
+        bool oevEnabled
+    ) internal returns (uint256) {
         // Collect Payment
         require(obscuraToken.transferFrom(msg.sender, address(this), paymentFee), "Fee payment failed");
 
@@ -140,6 +188,8 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         req.id = requestId;
         req.apiUrl = apiUrl;
         req.requester = msg.sender;
+        req.oevBeneficiary = beneficiary;
+        req.oevEnabled = oevEnabled;
         req.createdAt = block.timestamp;
         req.minThreshold = min;
         req.maxThreshold = max;
@@ -155,6 +205,101 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         uint256[8] calldata zkpProof, 
         uint256[2] calldata publicInputs
     ) external whenNotPaused nonReentrant {
+        _fulfillDataInternal(requestId, value, zkpProof, publicInputs, 0);
+    }
+
+    /**
+     * @notice Fulfill with OEV Bid: Searchers call this to prioritize their transaction.
+     * The bid is recaptured and sent to the protocol's beneficiary.
+     */
+    function fulfillDataWithOEV(
+        uint256 requestId,
+        uint256 value,
+        uint256[8] calldata zkpProof,
+        uint256[2] calldata publicInputs,
+        uint256 oevBid
+    ) external whenNotPaused nonReentrant {
+        Request storage req = requests[requestId];
+        require(req.oevEnabled, "OEV not enabled for this request");
+        _handleOEV(req, oevBid);
+        _fulfillDataInternal(requestId, value, zkpProof, publicInputs, oevBid);
+    }
+
+    function fulfillDataOptimistic(
+        uint256 requestId,
+        uint256 value
+    ) external whenNotPaused nonReentrant {
+        require(whitelistedNodes[msg.sender], "Not whitelisted");
+        Request storage req = requests[requestId];
+        require(!req.isOptimistic && req.finalValue == 0, "Already fulfilled");
+
+        req.isOptimistic = true;
+        req.finalValue = value;
+        req.challengeWindow = block.timestamp + CHALLENGE_PERIOD;
+        
+        emit OptimisticFulfillment(requestId, value, req.challengeWindow);
+    }
+
+    function disputeFulfillment(uint256 requestId) external whenNotPaused nonReentrant {
+        Request storage req = requests[requestId];
+        require(req.isOptimistic, "Not an optimistic fulfillment");
+        require(block.timestamp <= req.challengeWindow, "Challenge window closed");
+        require(!req.isDisputed, "Already disputed");
+
+        require(obscuraToken.transferFrom(msg.sender, address(this), DISPUTE_BOND), "Bond required");
+        
+        req.isDisputed = true;
+        req.disputer = msg.sender;
+
+        emit ChallengeRaised(requestId, msg.sender, DISPUTE_BOND);
+    }
+
+    function resolveDispute(
+        uint256 requestId,
+        uint256[8] calldata zkpProof,
+        uint256[2] calldata publicInputs
+    ) external whenNotPaused nonReentrant {
+        Request storage req = requests[requestId];
+        require(req.isDisputed, "No active dispute");
+
+        // Verify the ZK proof against the value that was posted optimistically
+        bool isValid = verifier.verifyProof(
+            [zkpProof[0], zkpProof[1]],
+            [[zkpProof[2], zkpProof[3]], [zkpProof[4], zkpProof[5]]],
+            [zkpProof[6], zkpProof[7]],
+            publicInputs
+        );
+
+        if (isValid && publicInputs[0] <= req.finalValue && publicInputs[1] >= req.finalValue) {
+            // Node was correct! Slashing challenger, rewarding node.
+            obscuraToken.transfer(msg.sender, DISPUTE_BOND); // Return bond + reward? For MVP just return bond.
+            emit DisputeResolved(requestId, true);
+        } else {
+            // Node was WRONG or proof failed. Slashing node, rewarding challenger.
+            // stakeGuard.slash(nodeAddr, amount); // Production logic
+            obscuraToken.transfer(req.disputer, DISPUTE_BOND * 2); 
+            req.finalValue = 0; // Invalidate result
+            emit DisputeResolved(requestId, false);
+        }
+        
+        req.isDisputed = false;
+        req.isOptimistic = false; // Finalized via ZK
+    }
+
+    function _handleOEV(Request storage req, uint256 oevBid) internal {
+        require(oevBid > 0, "Bid required for OEV fulfillment");
+        require(obscuraToken.transferFrom(msg.sender, address(this), oevBid), "OEV bid transfer failed");
+        oevEarnings[req.oevBeneficiary] += oevBid;
+        emit OEVCaptured(req.id, req.oevBeneficiary, oevBid);
+    }
+
+    function _fulfillDataInternal(
+        uint256 requestId, 
+        uint256 value, 
+        uint256[8] calldata zkpProof, 
+        uint256[2] calldata publicInputs,
+        uint256 /* oevBid */
+    ) internal {
         // 1. Authorization Check
         require(whitelistedNodes[msg.sender], "Not whitelisted");
         (,,, bool isActive) = stakeGuard.stakers(msg.sender);
@@ -339,6 +484,15 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         uint256 bal = obscuraToken.balanceOf(address(this));
         // This is a safety check: in production we'd track protocolFees explicitly
         obscuraToken.transfer(msg.sender, bal);
+    }
+
+    // --- OEV Rewards ---
+
+    function claimOEVEarnings() external nonReentrant {
+        uint256 amount = oevEarnings[msg.sender];
+        require(amount > 0, "No OEV earnings to claim");
+        oevEarnings[msg.sender] = 0;
+        require(obscuraToken.transfer(msg.sender, amount), "OEV transfer failed");
     }
 
     // --- VRF Logic ---

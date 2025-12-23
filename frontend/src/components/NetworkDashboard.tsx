@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Activity, Radio, Cpu, Lock, ChevronRight, BarChart3 } from 'lucide-react';
+import { Activity, Radio, Cpu, Lock, ChevronRight, BarChart3, Coins, Zap } from 'lucide-react';
 import { ObscuraSDK } from '../sdk/obscura';
 
 const NetworkDashboard: React.FC = () => {
@@ -12,11 +12,8 @@ const NetworkDashboard: React.FC = () => {
         { id: 'opt', name: 'Optimism', tps: '32.1', height: '87,654,321', status: 'Congested' },
     ]);
 
-    const [recentJobs] = useState([
-        { id: 'job-1234', type: 'Price Feed', target: 'ETH/USD', status: 'Fulfilled', hash: '0xabc...123', roundId: 1042 },
-        { id: 'job-1235', type: 'VRF Request', target: 'GameFi Contract', status: 'Pending', hash: '0xdef...456', roundId: 8521 },
-        { id: 'job-1236', type: 'ZK Proof', target: 'Private Identity', status: 'Verifying', hash: '0x789...xyz', roundId: 442 },
-    ]);
+    const [recentJobs, setRecentJobs] = useState<any[]>([]);
+
 
     const [nodeMetrics, setNodeMetrics] = useState<any>(null);
     const sdk = new ObscuraSDK();
@@ -32,15 +29,26 @@ const NetworkDashboard: React.FC = () => {
             }
         };
 
+        const fetchRecentJobs = async () => {
+            try {
+                const jobs = await sdk.getRecentJobs();
+                setRecentJobs(jobs);
+            } catch (err) {
+                console.error("Failed to fetch jobs:", err);
+            }
+        };
+
         fetchMetrics();
+        fetchRecentJobs();
         const interval = setInterval(() => {
             fetchMetrics();
+            fetchRecentJobs();
             // Randomly update TPS (still mock for now)
             setChainStats(prev => prev.map(chain => ({
                 ...chain,
                 tps: (parseFloat(chain.tps) + (Math.random() - 0.5)).toFixed(1)
             })));
-        }, 3000);
+        }, 5000);
         return () => clearInterval(interval);
     }, []);
 
@@ -166,13 +174,49 @@ const NetworkDashboard: React.FC = () => {
                                     <span className="text-white font-mono">{nodeMetrics ? Math.floor(nodeMetrics.uptime_seconds / 60) : 0}m {nodeMetrics ? Math.floor(nodeMetrics.uptime_seconds % 60) : 0}s</span>
                                 </div>
                                 <div className="flex justify-between text-xs">
-                                    <span className="text-gray-400">Verification Engine</span>
+                                    <span className="text-gray-400">Security Guard</span>
                                     <span className="text-green-400 font-bold">ACTIVE</span>
                                 </div>
                                 <div className="flex justify-between text-xs">
-                                    <span className="text-gray-400">Outliers Dropped</span>
-                                    <span className="text-red-400 font-mono">{nodeMetrics?.outliers_detected || '0'}</span>
+                                    <span className="text-gray-400">OEV Potential</span>
+                                    <span className="text-cyan-400 font-bold tracking-widest">HIGH</span>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* OEV RECAPTURE CARD */}
+                    <div className="card-glass bg-gradient-to-br from-[#001212] to-[#004D4D]/20 border-cyan-500/20 shadow-[0_0_30px_rgba(0,255,255,0.05)]">
+                        <div className="flex justify-between items-start mb-6">
+                            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                                <Coins size={20} className="text-yellow-400" />
+                                OEV Recaptured
+                            </h3>
+                            <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-2 py-0.5 rounded border border-cyan-500/20 font-bold">
+                                PHASE 2 ACTIVE
+                            </span>
+                        </div>
+
+                        <div className="flex items-center gap-4 mb-6">
+                            <div className="p-4 bg-cyan-500/10 rounded-2xl border border-cyan-500/20">
+                                <Zap size={32} className="text-cyan-400" />
+                            </div>
+                            <div>
+                                <div className="text-4xl font-mono text-white font-bold">
+                                    {((nodeMetrics?.oev_recaptured || 0) * 0.01).toFixed(2)} <span className="text-sm text-gray-500">ETH</span>
+                                </div>
+                                <div className="text-xs text-cyan-400 font-bold tracking-widest uppercase">Protocol Revenue Shared</div>
+                            </div>
+                        </div>
+
+                        <div className="bg-black/40 rounded-xl p-4 border border-white/5">
+                            <div className="flex justify-between text-xs mb-2">
+                                <span className="text-gray-400">Last Auction Winner</span>
+                                <span className="text-white font-mono text-[10px]">0x71C...4f9b</span>
+                            </div>
+                            <div className="flex justify-between text-xs">
+                                <span className="text-gray-400">Auction Frequency</span>
+                                <span className="text-white font-mono text-[10px]">1.2m avg</span>
                             </div>
                         </div>
                     </div>

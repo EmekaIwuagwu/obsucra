@@ -54,11 +54,24 @@ func (circuit *VRFCircuit) Define(api frontend.API) error {
 	return nil
 }
 
+// PrivateComputationCircuit proves SecretValue matches a specific logic (e.g., above threshold)
+type PrivateComputationCircuit struct {
+	SecretValue frontend.Variable `gnark:",secret"`
+	Threshold   frontend.Variable `gnark:",public"`
+	LogicType   frontend.Variable `gnark:",public"` // 0: GreaterThan, 1: LessThan, 2: Equal
+}
+
+func (circuit *PrivateComputationCircuit) Define(api frontend.API) error {
+	// Simplified branching logic for Phase 2 MVP
+	api.AssertIsLessOrEqual(circuit.Threshold, circuit.SecretValue)
+	return nil
+}
+
 var (
 	once                                   sync.Once
-	rangePK, vrfPK, bridgePK               groth16.ProvingKey
-	rangeVK, vrfVK, bridgeVK               groth16.VerifyingKey
-	rangeCCS, vrfCCS, bridgeCCS            constraint.ConstraintSystem
+	rangePK, vrfPK, bridgePK, privatePK               groth16.ProvingKey
+	rangeVK, vrfVK, bridgeVK, privateVK               groth16.VerifyingKey
+	rangeCCS, vrfCCS, bridgeCCS, privateCCS            constraint.ConstraintSystem
 )
 
 // Init sets up the proving system (Trusted Setup simulation)
@@ -84,6 +97,13 @@ func Init() error {
 		bridgeCCS, err = frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &bCircuit)
 		if err != nil { return }
 		bridgePK, bridgeVK, err = groth16.Setup(bridgeCCS)
+		if err != nil { return }
+
+		// 4. Private Computation Proof
+		var pCircuit PrivateComputationCircuit
+		privateCCS, err = frontend.Compile(ecc.BN254.ScalarField(), r1cs.NewBuilder, &pCircuit)
+		if err != nil { return }
+		privatePK, privateVK, err = groth16.Setup(privateCCS)
 	})
 	return err
 }
@@ -171,6 +191,26 @@ func GenerateBridgeProof(msgHash, originChain, secretKey *big.Int) (groth16.Proo
 	}
 
 	return groth16.Prove(bridgeCCS, bridgePK, witness)
+}
+
+// GeneratePrivateComputationProof creates a ZK proof for confidential data processing
+func GeneratePrivateComputationProof(secret, threshold *big.Int, logicType int) (groth16.Proof, error) {
+	if privateCCS == nil {
+		if err := Init(); err != nil {
+			return nil, err
+		}
+	}
+
+	witness, err := frontend.NewWitness(&PrivateComputationCircuit{
+		SecretValue: secret,
+		Threshold:   threshold,
+		LogicType:   logicType,
+	}, ecc.BN254.ScalarField())
+	if err != nil {
+		return nil, err
+	}
+
+	return groth16.Prove(privateCCS, privatePK, witness)
 }
 
 // SerializeProof converts Groth16 proof to Solidity-compatible uint256[8]

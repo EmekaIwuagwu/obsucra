@@ -9,7 +9,29 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/rs/zerolog/log"
+
+	"github.com/obscura-network/obscura-node/oracle"
 )
+
+// JobRecord represents a processed job for the dashboard
+type JobRecord struct {
+	ID        string    `json:"id"`
+	Type      string    `json:"type"`
+	Target    string    `json:"target"`
+	Status    string    `json:"status"`
+	Hash      string    `json:"hash"`
+	RoundID   uint64    `json:"round_id"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// Proposal represents a governance item
+type Proposal struct {
+	ID           int    `json:"id"`
+	Title        string `json:"title"`
+	VotesFor     int    `json:"votes_for"`
+	VotesAgainst int    `json:"votes_against"`
+	Status       string `json:"status"`
+}
 
 // MetricsCollector tracks node performance metrics
 type MetricsCollector struct {
@@ -22,13 +44,28 @@ type MetricsCollector struct {
 	outliersDetected      uint64
 	uptime                time.Time
 	lastRequestTime       time.Time
+	oevRecaptured         uint64 // Value in OBS units (e.g., micro-OBS)
+	recentJobs            []JobRecord
+	proposals             []Proposal
+	totalStaked           uint64
 }
 
 // NewMetricsCollector creates a new metrics collector
 func NewMetricsCollector() *MetricsCollector {
-	return &MetricsCollector{
+	mc := &MetricsCollector{
 		uptime: time.Now(),
 	}
+	mc.initStaticData()
+	return mc
+}
+
+func (mc *MetricsCollector) initStaticData() {
+	mc.proposals = []Proposal{
+		{ID: 1, Title: "OIP-12: Increase Slash Penalty", VotesFor: 65, VotesAgainst: 35, Status: "Active"},
+		{ID: 2, Title: "OIP-13: Add Solana Support", VotesFor: 92, VotesAgainst: 8, Status: "Active"},
+		{ID: 3, Title: "OIP-14: Reduce Min Stake", VotesFor: 45, VotesAgainst: 55, Status: "Ending Soon"},
+	}
+	mc.totalStaked = 42800000 // 42.8M base demo stake
 }
 
 // IncrementRequestsProcessed increments the requests counter
@@ -74,6 +111,31 @@ func (mc *MetricsCollector) IncrementOutliersDetected() {
 	mc.outliersDetected++
 }
 
+// IncrementOEVRecaptured adds to the total OEV recaptured
+func (mc *MetricsCollector) IncrementOEVRecaptured(amount uint64) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	mc.oevRecaptured += amount
+}
+
+// IncrementTotalStaked adds to the network-wide stake total
+func (mc *MetricsCollector) IncrementTotalStaked(amount uint64) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	mc.totalStaked += amount
+}
+
+// AddJobRecord adds a job to the recent history
+func (mc *MetricsCollector) AddJobRecord(job JobRecord) {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+	
+	mc.recentJobs = append([]JobRecord{job}, mc.recentJobs...)
+	if len(mc.recentJobs) > 50 {
+		mc.recentJobs = mc.recentJobs[:50]
+	}
+}
+
 // GetMetrics returns current metrics snapshot
 func (mc *MetricsCollector) GetMetrics() map[string]interface{} {
 	mc.mu.RLock()
@@ -86,8 +148,10 @@ func (mc *MetricsCollector) GetMetrics() map[string]interface{} {
 		"transactions_failed":    mc.transactionsFailed,
 		"aggregations_completed": mc.aggregationsCompleted,
 		"outliers_detected":      mc.outliersDetected,
+		"oev_recaptured":         mc.oevRecaptured,
 		"uptime_seconds":         time.Since(mc.uptime).Seconds(),
 		"last_request_timestamp": mc.lastRequestTime.Unix(),
+		"total_staked":           mc.totalStaked,
 	}
 }
 
@@ -136,17 +200,19 @@ obscura_uptime_seconds %d
 
 // MetricsServer serves metrics and health endpoints
 type MetricsServer struct {
-	collector *MetricsCollector
-	router    *mux.Router
-	port      string
+	collector   *MetricsCollector
+	feedManager *oracle.FeedManager
+	router      *mux.Router
+	port        string
 }
 
 // NewMetricsServer creates a new metrics HTTP server
-func NewMetricsServer(collector *MetricsCollector, port string) *MetricsServer {
+func NewMetricsServer(collector *MetricsCollector, feedManager *oracle.FeedManager, port string) *MetricsServer {
 	ms := &MetricsServer{
-		collector: collector,
-		router:    mux.NewRouter(),
-		port:      port,
+		collector:   collector,
+		feedManager: feedManager,
+		router:      mux.NewRouter(),
+		port:        port,
 	}
 
 	ms.setupRoutes()
@@ -157,6 +223,9 @@ func (ms *MetricsServer) setupRoutes() {
 	ms.router.HandleFunc("/health", ms.healthHandler).Methods("GET")
 	ms.router.HandleFunc("/metrics", ms.metricsHandler).Methods("GET")
 	ms.router.HandleFunc("/api/stats", ms.metricsHandler).Methods("GET") // Alias for SDK
+	ms.router.HandleFunc("/api/feeds", ms.feedsHandler).Methods("GET")
+	ms.router.HandleFunc("/api/jobs", ms.jobsHandler).Methods("GET")
+	ms.router.HandleFunc("/api/proposals", ms.proposalsHandler).Methods("GET")
 	ms.router.HandleFunc("/metrics/prometheus", ms.prometheusHandler).Methods("GET")
 	
 	// Add CORS middleware
@@ -194,6 +263,29 @@ func (ms *MetricsServer) metricsHandler(w http.ResponseWriter, r *http.Request) 
 func (ms *MetricsServer) prometheusHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write([]byte(ms.collector.GetPrometheusMetrics()))
+}
+
+func (ms *MetricsServer) feedsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if ms.feedManager != nil {
+		json.NewEncoder(w).Encode(ms.feedManager.GetLiveStatus())
+	} else {
+		json.NewEncoder(w).Encode([]interface{}{})
+	}
+}
+
+func (ms *MetricsServer) jobsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	ms.collector.mu.RLock()
+	defer ms.collector.mu.RUnlock()
+	json.NewEncoder(w).Encode(ms.collector.recentJobs)
+}
+
+func (ms *MetricsServer) proposalsHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	ms.collector.mu.RLock()
+	defer ms.collector.mu.RUnlock()
+	json.NewEncoder(w).Encode(ms.collector.proposals)
 }
 
 // Start starts the metrics HTTP server

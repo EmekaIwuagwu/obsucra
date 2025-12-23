@@ -1,11 +1,14 @@
-import React, { useRef, useMemo } from 'react';
+import React, { useRef, useMemo, useState, useEffect } from 'react';
+
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Stars } from '@react-three/drei';
 import { motion } from 'framer-motion';
 import * as THREE from 'three';
 import Logo from './Logo'; // Updated import
 import Features from './Features';
+import DataFeeds from './DataFeeds';
 import Footer from './Footer';
+import { ObscuraSDK } from '../sdk/obscura';
 
 // 3D Globe Component
 const Globe = () => {
@@ -103,6 +106,29 @@ const DataFlow = () => {
 }
 
 const LandingPage: React.FC<{ onNavigate: (page: string) => void }> = ({ onNavigate }) => {
+    const [feeds, setFeeds] = useState<any[]>([]);
+
+    useEffect(() => {
+        const sdk = new ObscuraSDK();
+        const fetchFeeds = async () => {
+            try {
+                const data = await sdk.getFeeds();
+                // Map backend FeedLiveStatus to DataFeeds format
+                const mapped = data.map((f: any) => ({
+                    name: f.id,
+                    price: f.value,
+                    status: f.is_zk ? 'ZK-Verified' : 'Standard',
+                    trend: 0
+                }));
+                setFeeds(mapped);
+            } catch (err) {
+                console.error("LandingPage: Failed to fetch feeds", err);
+            }
+        };
+        fetchFeeds();
+        const interval = setInterval(fetchFeeds, 5000);
+        return () => clearInterval(interval);
+    }, []);
     return (
         <div className="relative w-full bg-[#000033] text-white overflow-hidden overflow-y-auto h-screen scroll-smooth">
             {/* Hero Section (Full Screen) */}
@@ -164,10 +190,10 @@ const LandingPage: React.FC<{ onNavigate: (page: string) => void }> = ({ onNavig
                                 Get Started
                             </button>
                             <button
-                                onClick={() => onNavigate('ecosystem')}
+                                onClick={() => onNavigate('enterprise')}
                                 className="px-8 py-4 border border-white/30 backdrop-blur-md rounded-full text-white font-bold hover:bg-white/10 transition-all"
                             >
-                                View Ecosystem
+                                View Enterprise
                             </button>
                         </div>
                     </motion.div>
@@ -184,6 +210,10 @@ const LandingPage: React.FC<{ onNavigate: (page: string) => void }> = ({ onNavig
             </section>
 
             {/* Features Section */}
+            <div id="feeds" className="max-w-7xl mx-auto px-6">
+                <DataFeeds feeds={feeds} history={[]} />
+            </div>
+
             <div id="features">
                 <Features />
             </div>

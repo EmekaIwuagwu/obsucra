@@ -29,7 +29,7 @@ type EventListener struct {
 
 // Hardcoded ABI for Event Parsing (Partial)
 const OracleEventABI = `[
-	{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"requestId","type":"uint256"},{"indexed":false,"internalType":"string","name":"apiUrl","type":"string"},{"indexed":false,"internalType":"uint256","name":"min","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"max","type":"uint256"},{"indexed":true,"internalType":"address","name":"requester","type":"address"}],"name":"RequestData","type":"event"},
+	{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"requestId","type":"uint256"},{"indexed":false,"internalType":"string","name":"apiUrl","type":"string"},{"indexed":false,"internalType":"uint256","name":"min","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"max","type":"uint256"},{"indexed":true,"internalType":"address","name":"requester","type":"address"},{"indexed":false,"internalType":"bool","name":"oevEnabled","type":"bool"},{"indexed":false,"internalType":"address","name":"oevBeneficiary","type":"address"},{"indexed":false,"internalType":"bool","name":"isOptimistic","type":"bool"}],"name":"RequestData","type":"event"},
 	{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"requestId","type":"uint256"},{"indexed":false,"internalType":"string","name":"seed","type":"string"},{"indexed":true,"internalType":"address","name":"requester","type":"address"}],"name":"RandomnessRequested","type":"event"}
 ]`
 
@@ -138,13 +138,19 @@ func (el *EventListener) handleLog(vLog types.Log) {
 		url := vals[1].(string)
 		min := vals[2].(*big.Int)
 		max := vals[3].(*big.Int)
+		oevEnabled := vals[4].(bool)
+		oevBeneficiary := vals[5].(common.Address)
+		isOptimistic := vals[6].(bool)
 		
 		el.JobManager.Dispatch(oracle.JobRequest{
-			ID:        id,
-			Type:      oracle.JobTypeDataFeed,
-			Params:    map[string]interface{}{"url": url, "min": min, "max": max},
-			Requester: requester.Hex(),
-			Timestamp: time.Now(),
+			ID:             id,
+			Type:           oracle.JobTypeDataFeed,
+			Params:         map[string]interface{}{"url": url, "min": min, "max": max},
+			Requester:      requester.Hex(),
+			Timestamp:      time.Now(),
+			OEVEnabled:     oevEnabled,
+			OEVBeneficiary: oevBeneficiary.Hex(),
+			IsOptimistic:   isOptimistic,
 		})
 
 	case "RandomnessRequested":

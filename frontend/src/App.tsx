@@ -4,13 +4,12 @@ import LandingPage from './components/LandingPage';
 import NetworkDashboard from './components/NetworkDashboard'; // The new functional dashboard
 import NodeManager from './components/NodeManager';
 import FeedsExplorer from './components/FeedsExplorer';
+import ConfidentialCompute from './components/ConfidentialCompute';
+import EnterpriseGateway from './components/EnterpriseGateway';
 import StakingInterface from './components/StakingInterface';
 import Governance from './components/Governance';
-import { Activity, Server, Database, Layers, Vote, Home, Zap, Code, Globe, Info } from 'lucide-react';
-
+import { Activity, Server, Database, Layers, Vote, Home, Code, Info, Shield, Building2 } from 'lucide-react';
 import Developers from './components/Developers';
-import Products from './components/Products';
-import Ecosystem from './components/Ecosystem';
 import About from './components/About';
 
 function App() {
@@ -20,9 +19,9 @@ function App() {
     { id: 'dashboard', label: 'Dashboard', icon: Activity },
     { id: 'nodes', label: 'Nodes', icon: Server },
     { id: 'feeds', label: 'Feeds', icon: Database },
-    { id: 'products', label: 'Products', icon: Zap },
+    { id: 'privacy', label: 'Privacy Compute', icon: Shield },
+    { id: 'enterprise', label: 'Enterprise Gateway', icon: Building2 },
     { id: 'developers', label: 'Developers', icon: Code },
-    { id: 'ecosystem', label: 'Ecosystem', icon: Globe },
     { id: 'staking', label: 'Staking', icon: Layers },
     { id: 'governance', label: 'Governance', icon: Vote },
     { id: 'about', label: 'About', icon: Info },
@@ -38,9 +37,9 @@ function App() {
       case 'dashboard': return <NetworkDashboard />;
       case 'nodes': return <NodeManager />;
       case 'feeds': return <FeedsExplorer />;
-      case 'products': return <Products />;
+      case 'privacy': return <ConfidentialCompute />;
+      case 'enterprise': return <EnterpriseGateway />;
       case 'developers': return <Developers />;
-      case 'ecosystem': return <Ecosystem />;
       case 'staking': return <StakingInterface />;
       case 'governance': return <Governance />;
       case 'about': return <About />;

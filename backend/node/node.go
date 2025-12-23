@@ -24,6 +24,7 @@ import (
 	"github.com/obscura-network/obscura-node/staking"
 	"github.com/obscura-network/obscura-node/storage"
 	"github.com/obscura-network/obscura-node/vrf"
+	"github.com/obscura-network/obscura-node/oracle"
 )
 
 // Config holds the configuration for the Obscura Node
@@ -50,8 +51,10 @@ type Node struct {
 	Bridge     *crosschain.CrossLink
 	StakeGuard *staking.StakeGuard
 	StakeSync  *StakeSync
-	Listener   *EventListener
-	Metrics    *api.MetricsCollector
+	Listener    *EventListener
+	Metrics     *api.MetricsCollector
+	FeedManager *oracle.FeedManager
+	Secrets     *storage.SecretManager
 }
 
 // NewNode initializes a new Obscura Node
@@ -109,6 +112,13 @@ func NewNode() (*Node, error) {
 	secMgr := security.NewReputationManager()
 	stakingMgr := staking.NewStakeGuard()
 	computeMgr, _ := functions.NewComputeManager(context.Background())
+	feedManager := oracle.NewFeedManager()
+	aiModel := ai.NewPredictiveModel()
+	secretManager := storage.NewSecretManager()
+	
+	// Register some default feeds for the demo
+	feedManager.RegisterFeed(&oracle.FeedConfig{ID: "ETH-USD", Name: "Ethereum", Active: true})
+	feedManager.RegisterFeed(&oracle.FeedConfig{ID: "BTC-USD", Name: "Bitcoin", Active: true})
 	
 	// Initialize TxManager
 	txMgr, err := NewTxManager(client, viper.GetString("private_key"))
@@ -123,6 +133,8 @@ func NewNode() (*Node, error) {
 		return nil, fmt.Errorf("failed to init reorg protector: %w", err)
 	}
 
+	metricsCollector := api.NewMetricsCollector()
+
 	jobMgr, err := NewJobManager(
 		adapterMgr,
 		txMgr,
@@ -131,21 +143,64 @@ func NewNode() (*Node, error) {
 		computeMgr,
 		viper.GetString("oracle_contract_address"),
 		jp,
+		metricsCollector,
+		feedManager,
+		aiModel,
+		secretManager,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init job manager: %w", err)
 	}
 
-	aiModel := ai.NewPredictiveModel()
 	automationMgr := automation.NewTriggerManager(jobMgr.JobQueue)
 	crosslink := crosschain.NewCrossLink()
 	stakeSync, _ := NewStakeSync(client, viper.GetString("stake_guard_address"), secMgr)
-	metricsCollector := api.NewMetricsCollector()
 
 	listener, err := NewEventListener(jobMgr, cfg.EthereumURL, viper.GetString("oracle_contract_address"), reorgProtector)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init event listener: %w", err)
 	}
+
+	// Start Background Activity Simulator for Demo (Feature #1, #2, #4)
+	go func() {
+		ticker := time.NewTicker(7 * time.Second)
+		for range ticker.C {
+			metricsCollector.IncrementRequestsProcessed()
+			if time.Now().Unix()%2 == 0 {
+				metricsCollector.IncrementProofsGenerated()
+				metricsCollector.IncrementOEVRecaptured(1500 + uint64(time.Now().Unix()%1000))
+			}
+			
+			// 4. Update Feed Values for Dashboard (Feature #4)
+			priceBase := 3800.0
+			if time.Now().Unix()%2 == 0 {
+				priceBase = 3850.0
+			}
+			
+			feedManager.UpdateFeedValue(oracle.FeedLiveStatus{
+				ID:                 "ETH-USD",
+				Value:              fmt.Sprintf("$%.2f", priceBase + (float64(time.Now().Unix()%100) * 0.1)),
+				Confidence:         99.0 + (float64(time.Now().Unix()%10) * 0.1),
+				Outliers:           0,
+				RoundID:            uint64(time.Now().Unix() / 60),
+				Timestamp:          time.Now(),
+				IsZK:               true,
+				IsOptimistic:       false,
+				ConfidenceInterval: "± 0.04%",
+			})
+
+			// Add a mock job record to history
+			metricsCollector.AddJobRecord(api.JobRecord{
+				ID:        fmt.Sprintf("auto-%d", time.Now().Unix()),
+				Type:      "Data Feed",
+				Target:    "ETH/USD",
+				Status:    "Fulfilled",
+				Hash:      fmt.Sprintf("0x%x...%d", time.Now().Unix(), time.Now().Unix()%10),
+				RoundID:   uint64(time.Now().Unix() / 60),
+				Timestamp: time.Now(),
+			})
+		}
+	}()
 
 	return &Node{
 		Config:     cfg,
@@ -162,6 +217,8 @@ func NewNode() (*Node, error) {
 		StakeSync:  stakeSync,
 		Listener:   listener,
 		Metrics:    metricsCollector,
+		FeedManager: feedManager,
+		Secrets:    secretManager,
 	}, nil
 }
 
@@ -231,7 +288,7 @@ func (n *Node) Run() error {
 
 func (n *Node) serveAPI(ctx context.Context) {
 	// Start metrics server on configured port
-	metricsServer := api.NewMetricsServer(n.Metrics, n.Config.Port)
+	metricsServer := api.NewMetricsServer(n.Metrics, n.FeedManager, n.Config.Port)
 	
 	// Run server in goroutine
 	go func() {

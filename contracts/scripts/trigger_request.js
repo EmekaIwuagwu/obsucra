@@ -20,14 +20,26 @@ async function main() {
     const Oracle = await ethers.getContractFactory("ObscuraOracle");
     const oracle = Oracle.attach(oracleAddr);
 
-    console.log(`📡 Sending request to Oracle at ${oracleAddr}...`);
+    const useOEV = process.env.OEV === "true";
+    console.log(`📡 Sending ${useOEV ? "OEV-POSITIVE" : "Standard"} request to Oracle...`);
 
-    const tx = await oracle.connect(requester).requestData(
-        "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
-        9000000000000, // 90k min (8 decimals)
-        11000000000000, // 110k max
-        "Test E2E BTC Feed"
-    );
+    let tx;
+    if (useOEV) {
+        tx = await oracle.connect(requester).requestDataOEV(
+            "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
+            9000000000000,
+            11000000000000,
+            "E2E OEV BTC Feed",
+            requester.address
+        );
+    } else {
+        tx = await oracle.connect(requester).requestData(
+            "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
+            9000000000000,
+            11000000000000,
+            "E2E Standard BTC Feed"
+        );
+    }
 
     const receipt = await tx.wait();
     console.log(`✅ Request sent! TX: ${receipt.hash}`);

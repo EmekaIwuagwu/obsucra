@@ -127,28 +127,41 @@ console.log('Verified Price:', price.value);`}</pre>
 
                 {activeSection === 'api' && (
                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="card-glass p-12 min-h-[400px]">
-                        <h3 className="text-3xl font-bold text-white mb-6">API Reference</h3>
-                        <div className="font-mono text-sm space-y-8">
+                        <h3 className="text-3xl font-bold text-white mb-6">API Reference (v1.0)</h3>
+                        <div className="font-mono text-sm space-y-10">
                             <div>
                                 <div className="flex items-center gap-2 mb-2">
                                     <span className="px-2 py-1 bg-green-900 text-green-400 rounded">GET</span>
-                                    <span className="text-white">/v1/feeds/{`{pair}`}</span>
+                                    <span className="text-white">/api/stats</span>
                                 </div>
-                                <p className="text-gray-400">Returns the latest aggregated price with ZK proof.</p>
+                                <p className="text-gray-400">Returns node telemetry including uptime, proofs generated, and OEV recaptured.</p>
                             </div>
                             <div>
                                 <div className="flex items-center gap-2 mb-2">
-                                    <span className="px-2 py-1 bg-blue-900 text-blue-400 rounded">POST</span>
-                                    <span className="text-white">/v1/request/randomness</span>
+                                    <span className="px-2 py-1 bg-green-900 text-green-400 rounded">GET</span>
+                                    <span className="text-white">/api/feeds</span>
                                 </div>
-                                <p className="text-gray-400">Initiates a VRF request. Returns jobId.</p>
+                                <p className="text-gray-400">Returns list of active data feeds with live values, confidence intervals, and ZK status.</p>
                             </div>
                             <div>
                                 <div className="flex items-center gap-2 mb-2">
-                                    <span className="px-2 py-1 bg-purple-900 text-purple-400 rounded">POST</span>
-                                    <span className="text-white">/v1/compute/submit</span>
+                                    <span className="px-2 py-1 bg-green-900 text-green-400 rounded">GET</span>
+                                    <span className="text-white">/api/jobs</span>
                                 </div>
-                                <p className="text-gray-400">Submits a WASM binary for execution.</p>
+                                <p className="text-gray-400">Returns the last 50 processed oracle requests (Price Feeds, VRF, ZK Compute).</p>
+                            </div>
+                            <div>
+                                <div className="flex items-center gap-2 mb-2">
+                                    <span className="px-2 py-1 bg-green-900 text-green-400 rounded">GET</span>
+                                    <span className="text-white">/api/proposals</span>
+                                </div>
+                                <p className="text-gray-400">Returns the list of community governance proposals for the DAO.</p>
+                            </div>
+                            <div className="pt-6 border-t border-white/5">
+                                <h4 className="text-gray-300 mb-2 uppercase text-xs font-bold tracking-widest text-cyan-400">Authenticated Sources</h4>
+                                <div className="text-xs text-gray-500 leading-relaxed">
+                                    Private endpoints require injection from the node's secure vault. Use the Enterprise Gateway UI to manage institutional credentials.
+                                </div>
                             </div>
                         </div>
                     </motion.div>
