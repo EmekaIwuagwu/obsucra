@@ -29,6 +29,7 @@ type JobManager struct {
 	computeMgr  *functions.ComputeManager
 	oracleAddr  common.Address
 	oracleABI   abi.ABI
+	persistence *JobPersistence
 }
 
 const OracleWriteABI = `[
@@ -37,26 +38,34 @@ const OracleWriteABI = `[
 ]`
 
 // NewJobManager creates a new JobManager
-func NewJobManager(am *adapters.AdapterManager, txMgr *TxManager, vrfMgr *vrf.RandomnessManager, repMgr *security.ReputationManager, cm *functions.ComputeManager, contractAddr string) (*JobManager, error) {
+func NewJobManager(am *adapters.AdapterManager, txMgr *TxManager, vrfMgr *vrf.RandomnessManager, repMgr *security.ReputationManager, cm *functions.ComputeManager, contractAddr string, jp *JobPersistence) (*JobManager, error) {
 	parsed, err := abi.JSON(strings.NewReader(OracleWriteABI))
 	if err != nil {
 		return nil, err
 	}
 
 	return &JobManager{
-		JobQueue:   make(chan oracle.JobRequest, 100),
-		adapters:   am,
-		txMgr:      txMgr,
-		vrfMgr:     vrfMgr,
-		repMgr:     repMgr,
-		computeMgr: cm,
-		oracleAddr: common.HexToAddress(contractAddr),
-		oracleABI:  parsed,
+		JobQueue:    make(chan oracle.JobRequest, 100),
+		adapters:    am,
+		txMgr:       txMgr,
+		vrfMgr:      vrfMgr,
+		repMgr:      repMgr,
+		computeMgr:  cm,
+		oracleAddr:  common.HexToAddress(contractAddr),
+		oracleABI:   parsed,
+		persistence: jp,
 	}, nil
 }
 
 // Dispatch adds a job to the queue
 func (jm *JobManager) Dispatch(job oracle.JobRequest) {
+	// Persist before dispatching
+	if jm.persistence != nil {
+		if err := jm.persistence.SavePendingJob(job); err != nil {
+			log.Error().Err(err).Str("job_id", job.ID).Msg("Failed to persist job")
+		}
+	}
+
 	jm.JobQueue <- job
 	log.Info().Str("job_id", job.ID).Str("type", string(job.Type)).Msg("Job submitted")
 }
@@ -68,6 +77,17 @@ func (jm *JobManager) Start(ctx context.Context) {
 	// Ensure ZKP system is ready
 	if err := zkp.Init(); err != nil {
 		log.Error().Err(err).Msg("Failed to initialize ZKP system. ZK proofs will fail.")
+	}
+
+	// Load pending jobs on startup
+	if jm.persistence != nil {
+		pending, err := jm.persistence.LoadPendingJobs()
+		if err == nil {
+			for _, job := range pending {
+				log.Info().Str("job_id", job.ID).Msg("Restoring pending job from storage")
+				jm.JobQueue <- job
+			}
+		}
 	}
 
 	for {
@@ -93,6 +113,13 @@ func (jm *JobManager) processJob(ctx context.Context, job oracle.JobRequest) {
 		jm.handleCompute(ctx, job)
 	default:
 		log.Warn().Str("type", string(job.Type)).Msg("Unknown job type")
+	}
+
+	// Mark as completed in persistence
+	if jm.persistence != nil {
+		if err := jm.persistence.MarkJobCompleted(job.ID); err != nil {
+			log.Error().Err(err).Str("job_id", job.ID).Msg("Failed to mark job as completed in storage")
+		}
 	}
 }
 
@@ -129,8 +156,8 @@ func (jm *JobManager) handleDataFeed(ctx context.Context, job oracle.JobRequest)
 	log.Info().Str("job_id", job.ID).Msg("Generating Zero-Knowledge Range Proof")
 	
 	// Range verification: value ± 10% or similar. For demo/MVP using hardcoded range or job params.
-	minInt, _ := job.Params["min"].(*big.Int)
-	maxInt, _ := job.Params["max"].(*big.Int)
+	minInt := toBigInt(job.Params["min"])
+	maxInt := toBigInt(job.Params["max"])
 	if minInt == nil { minInt = new(big.Int).Sub(valInt, big.NewInt(1000000)) }
 	if maxInt == nil { maxInt = new(big.Int).Add(valInt, big.NewInt(1000000)) }
 
@@ -201,6 +228,23 @@ func (jm *JobManager) handleVRF(ctx context.Context, job oracle.JobRequest) {
 	}
 
 	log.Info().Str("tx_hash", txHash.Hex()).Msg("VRF Fulfillment Sent")
+}
+
+func toBigInt(val interface{}) *big.Int {
+	if val == nil {
+		return nil
+	}
+	switch v := val.(type) {
+	case *big.Int:
+		return v
+	case string:
+		i := new(big.Int)
+		i.SetString(v, 10)
+		return i
+	case float64:
+		return big.NewInt(int64(v))
+	}
+	return nil
 }
 
 func (jm *JobManager) handleCompute(ctx context.Context, job oracle.JobRequest) {

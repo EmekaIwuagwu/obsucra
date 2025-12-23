@@ -116,13 +116,21 @@ func NewNode() (*Node, error) {
 		return nil, fmt.Errorf("failed to init tx manager: %w", err)
 	}
 
+	// Reorg Protection & Persistence
+	jp := NewJobPersistence(store)
+	reorgProtector, err := NewReorgProtector(client, store, 12) // 12 confirmations
+	if err != nil {
+		return nil, fmt.Errorf("failed to init reorg protector: %w", err)
+	}
+
 	jobMgr, err := NewJobManager(
-		adapterMgr, 
-		txMgr, 
+		adapterMgr,
+		txMgr,
 		vrfMgr,
 		secMgr,
 		computeMgr,
 		viper.GetString("oracle_contract_address"),
+		jp,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init job manager: %w", err)
@@ -133,8 +141,8 @@ func NewNode() (*Node, error) {
 	crosslink := crosschain.NewCrossLink()
 	stakeSync, _ := NewStakeSync(client, viper.GetString("stake_guard_address"), secMgr)
 	metricsCollector := api.NewMetricsCollector()
-	
-	listener, err := NewEventListener(jobMgr, cfg.EthereumURL, viper.GetString("oracle_contract_address"))
+
+	listener, err := NewEventListener(jobMgr, cfg.EthereumURL, viper.GetString("oracle_contract_address"), reorgProtector)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init event listener: %w", err)
 	}

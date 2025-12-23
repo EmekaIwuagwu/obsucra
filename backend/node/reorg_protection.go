@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -136,14 +137,40 @@ func (jp *JobPersistence) SavePendingJob(job oracle.JobRequest) error {
 
 // LoadPendingJobs loads all pending jobs from storage
 func (jp *JobPersistence) LoadPendingJobs() ([]oracle.JobRequest, error) {
-	// This is a simplified implementation
-	// In production, you'd iterate through all pending_job_* keys
 	var jobs []oracle.JobRequest
 	
-	// For now, return empty slice
-	// The storage interface would need to be extended to support listing keys
-	log.Info().Msg("Job persistence: Loading pending jobs (not yet implemented)")
+	allJobs := jp.store.GetAllJobs()
+	for key, data := range allJobs {
+		if !strings.HasPrefix(key, "pending_job_") {
+			continue
+		}
+
+		m, ok := data.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Skip completed jobs
+		if completed, ok := m["completed"].(bool); ok && completed {
+			continue
+		}
+
+		id, _ := m["id"].(string)
+		jobType, _ := m["type"].(string)
+		params, _ := m["params"].(map[string]interface{})
+		requester, _ := m["requester"].(string)
+		ts, _ := m["timestamp"].(float64)
+
+		jobs = append(jobs, oracle.JobRequest{
+			ID:        id,
+			Type:      oracle.JobType(jobType),
+			Params:    params,
+			Requester: requester,
+			Timestamp: time.Unix(int64(ts), 0),
+		})
+	}
 	
+	log.Info().Int("count", len(jobs)).Msg("Job persistence: Loaded pending jobs")
 	return jobs, nil
 }
 

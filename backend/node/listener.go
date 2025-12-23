@@ -34,21 +34,18 @@ const OracleEventABI = `[
 ]`
 
 // NewEventListener creates a new listener
-func NewEventListener(jm *JobManager, rpc string, contractAddr string) (*EventListener, error) {
+func NewEventListener(jm *JobManager, rpc string, contractAddr string, rp *ReorgProtector) (*EventListener, error) {
 	parsedABI, err := abi.JSON(strings.NewReader(OracleEventABI))
 	if err != nil {
 		return nil, err
 	}
-	
-	// Reorg protector will be initialized later when we have access to client and store
-	// For now, listener works without it (will be added in integration phase)
 	
 	return &EventListener{
 		JobManager:     jm,
 		RPCEndpoint:    rpc,
 		ContractAddr:   common.HexToAddress(contractAddr),
 		oracleABI:      parsedABI,
-		reorgProtector: nil, // Will be set later
+		reorgProtector: rp,
 	}, nil
 }
 

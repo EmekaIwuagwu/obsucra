@@ -14,6 +14,7 @@ type Store interface {
 	GetJob(id string) (interface{}, bool)
 	SaveReputation(nodeID string, score float64) error
 	GetReputation(nodeID string) float64
+	GetAllJobs() map[string]interface{}
 	Close() error
 }
 
@@ -97,6 +98,18 @@ func (fs *FileStore) flush() error {
 		return err
 	}
 	return nil
+}
+
+func (fs *FileStore) GetAllJobs() map[string]interface{} {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	
+	// Return a copy to avoid race conditions
+	copy := make(map[string]interface{})
+	for k, v := range fs.Data.Jobs {
+		copy[k] = v
+	}
+	return copy
 }
 
 func (fs *FileStore) Close() error {

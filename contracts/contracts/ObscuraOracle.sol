@@ -39,6 +39,17 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         uint256 value;
     }
 
+    struct Round {
+        uint80 roundId;
+        int256 answer;
+        uint256 startedAt;
+        uint256 updatedAt;
+        uint80 answeredInRound;
+    }
+
+    uint80 public latestRoundId;
+    mapping(uint80 => Round) public rounds;
+
     struct Request {
         uint256 id;
         string apiUrl;
@@ -59,6 +70,7 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
     event RequestData(uint256 indexed requestId, string apiUrl, uint256 min, uint256 max, address indexed requester);
     event DataSubmitted(uint256 indexed requestId, address indexed node, uint256 value);
     event RequestFulfilled(uint256 indexed requestId, uint256 finalValue);
+    event NewRound(uint80 indexed roundId, int256 answer, uint256 updatedAt);
     
     event RandomnessRequested(uint256 indexed requestId, string seed, address indexed requester);
     event RandomnessFulfilled(uint256 indexed requestId, uint256 randomness);
@@ -186,6 +198,17 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         req.finalValue = medianValue;
         req.resolved = true;
 
+        // Store as a new persistent round
+        latestRoundId++;
+        rounds[latestRoundId] = Round({
+            roundId: latestRoundId,
+            answer: int256(medianValue),
+            startedAt: req.createdAt,
+            updatedAt: block.timestamp,
+            answeredInRound: latestRoundId
+        });
+        emit NewRound(latestRoundId, int256(medianValue), block.timestamp);
+
         // Pay the nodes (distribute fee) AND slash outliers
         if (req.responses.length > 0) {
             uint256 totalReward = (paymentFee * REWARD_PERCENT) / 100;
@@ -243,6 +266,54 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         _aggregateAndFinalize(requestId);
     }
 
+    // --- Chainlink Compatibility ---
+
+    function latestRoundData() external view returns (
+        uint80 roundId,
+        int256 answer,
+        uint256 startedAt,
+        uint256 updatedAt,
+        uint80 answeredInRound
+    ) {
+        require(latestRoundId > 0, "No rounds exist");
+        Round storage r = rounds[latestRoundId];
+        return (r.roundId, r.answer, r.startedAt, r.updatedAt, r.answeredInRound);
+    }
+
+    function getRoundData(uint80 _roundId) external view returns (
+        uint80 roundId,
+        int256 answer,
+        uint256 startedAt,
+        uint256 updatedAt,
+        uint80 answeredInRound
+    ) {
+        require(_roundId <= latestRoundId && _roundId > 0, "Invalid round ID");
+        Round storage r = rounds[_roundId];
+        return (r.roundId, r.answer, r.startedAt, r.updatedAt, r.answeredInRound);
+    }
+
+    function decimals() external pure returns (uint8) {
+        return 8; // Standard for price feeds
+    }
+
+    function description() external pure returns (string memory) {
+        return "Obscura Privacy Oracle Feed";
+    }
+
+    function version() external pure returns (uint256) {
+        return 1;
+    }
+
+    function latestAnswer() external view returns (int256) {
+        require(latestRoundId > 0, "No rounds exist");
+        return rounds[latestRoundId].answer;
+    }
+
+    function latestTimestamp() external view returns (uint256) {
+        require(latestRoundId > 0, "No rounds exist");
+        return rounds[latestRoundId].updatedAt;
+    }
+
     // --- Rewards & Refunds ---
 
     function claimRewards() external nonReentrant {
@@ -284,7 +355,7 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         return requestId;
     }
 
-    function fulfillRandomness(uint256 requestId, uint256 randomness, bytes calldata proof) external whenNotPaused nonReentrant {
+    function fulfillRandomness(uint256 requestId, uint256 randomness, bytes calldata /* proof */) external whenNotPaused nonReentrant {
         require(whitelistedNodes[msg.sender], "Not whitelisted");
         (,,, bool isActive) = stakeGuard.stakers(msg.sender);
         require(isActive, "Node not active");
