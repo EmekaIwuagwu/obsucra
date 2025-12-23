@@ -100,7 +100,7 @@ const DataFeeds: React.FC<DataFeedsProps> = ({ feeds, history }) => {
     );
 };
 
-function FeedItem({ name, price, status, color = "neon" }: { name: string, price: string, status: string, color?: "neon" | "purple" }) {
+function FeedItem({ name, price, status, color = "neon", round = 1042 }: { name: string, price: string, status: string, color?: "neon" | "purple", round?: number }) {
     const glowColor = color === "neon" ? "group-hover:shadow-[0_0_15px_#00FFFF]" : "group-hover:shadow-[0_0_15px_#FF00FF]";
     const textColor = color === "neon" ? "text-neon" : "text-purple";
     const borderColor = color === "neon" ? "border-neon/20" : "border-purple/20";
@@ -111,7 +111,10 @@ function FeedItem({ name, price, status, color = "neon" }: { name: string, price
             className={`group p-6 glass rounded-2xl border ${borderColor} flex justify-between items-center transition-all ${glowColor}`}
         >
             <div className="flex flex-col">
-                <span className="font-bold text-lg">{name}</span>
+                <div className="flex items-center gap-2">
+                    <span className="font-bold text-lg">{name}</span>
+                    <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded text-gray-400 font-mono">R{round}</span>
+                </div>
                 <span className={`text-[10px] uppercase font-bold tracking-widest ${textColor}`}>{status}</span>
             </div>
             <div className="text-2xl font-mono text-white/90 font-bold">{price}</div>

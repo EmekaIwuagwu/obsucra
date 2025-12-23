@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Activity, Radio, Cpu, Lock, ChevronRight } from 'lucide-react';
+import { Activity, Radio, Cpu, Lock, ChevronRight, BarChart3 } from 'lucide-react';
+import { ObscuraSDK } from '../sdk/obscura';
 
 const NetworkDashboard: React.FC = () => {
     // Mock Data for "Reports from different blockchains"
@@ -12,15 +13,29 @@ const NetworkDashboard: React.FC = () => {
     ]);
 
     const [recentJobs] = useState([
-        { id: 'job-1234', type: 'Price Feed', target: 'ETH/USD', status: 'Fulfilled', hash: '0xabc...123' },
-        { id: 'job-1235', type: 'VRF Request', target: 'GameFi Contract', status: 'Pending', hash: '0xdef...456' },
-        { id: 'job-1236', type: 'ZK Proof', target: 'Private Identity', status: 'Verifying', hash: '0x789...xyz' },
+        { id: 'job-1234', type: 'Price Feed', target: 'ETH/USD', status: 'Fulfilled', hash: '0xabc...123', roundId: 1042 },
+        { id: 'job-1235', type: 'VRF Request', target: 'GameFi Contract', status: 'Pending', hash: '0xdef...456', roundId: 8521 },
+        { id: 'job-1236', type: 'ZK Proof', target: 'Private Identity', status: 'Verifying', hash: '0x789...xyz', roundId: 442 },
     ]);
 
-    // Simulate live updates
+    const [nodeMetrics, setNodeMetrics] = useState<any>(null);
+    const sdk = new ObscuraSDK();
+
+    // Simulate live updates & Fetch real metrics
     useEffect(() => {
+        const fetchMetrics = async () => {
+            try {
+                const stats = await sdk.getNetworkStats();
+                setNodeMetrics(stats);
+            } catch (err) {
+                console.error("Failed to fetch node metrics:", err);
+            }
+        };
+
+        fetchMetrics();
         const interval = setInterval(() => {
-            // Randomly update TPS
+            fetchMetrics();
+            // Randomly update TPS (still mock for now)
             setChainStats(prev => prev.map(chain => ({
                 ...chain,
                 tps: (parseFloat(chain.tps) + (Math.random() - 0.5)).toFixed(1)
@@ -99,7 +114,7 @@ const NetworkDashboard: React.FC = () => {
                                 <div className="flex items-center gap-8">
                                     <div className="text-right hidden sm:block">
                                         <div className={`text-xs font-bold ${job.status === 'Fulfilled' ? 'text-green-400' : 'text-yellow-400'}`}>
-                                            {job.status}
+                                            {job.status} {job.roundId && <span className="text-gray-500 ml-1">#R{job.roundId}</span>}
                                         </div>
                                         <div className="text-xs font-mono text-gray-500">{job.hash}</div>
                                     </div>
@@ -114,32 +129,50 @@ const NetworkDashboard: React.FC = () => {
                     </button>
                 </div>
 
-                {/* System Health / Alerts */}
+                {/* System Health / Live Telemetry */}
                 <div className="space-y-6">
                     <div className="card-glass bg-gradient-to-br from-[#000033] to-[#4B0082]/50 border-none">
-                        <h3 className="text-lg font-bold text-white mb-4">Node Health</h3>
-                        <div className="flex justify-center relative w-40 h-40 mx-auto mb-6">
-                            <svg className="w-full h-full transform -rotate-90">
-                                <circle cx="80" cy="80" r="70" stroke="#333" strokeWidth="10" fill="transparent" />
-                                <circle cx="80" cy="80" r="70" stroke="#00FF00" strokeWidth="10" fill="transparent" strokeDasharray="440" strokeDashoffset="20" strokeLinecap="round" />
-                            </svg>
-                            <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                <span className="text-3xl font-bold text-white">98%</span>
-                                <span className="text-xs text-green-400">OPTIMAL</span>
+                        <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                            <BarChart3 size={20} className="text-[#00FFFF]" />
+                            Live Telemetry
+                        </h3>
+
+                        <div className="space-y-6">
+                            <div className="flex justify-between items-end border-b border-white/5 pb-4">
+                                <div>
+                                    <div className="text-[10px] text-gray-400 uppercase tracking-widest mb-1">Requests Processed</div>
+                                    <div className="text-3xl font-mono text-white">{nodeMetrics?.requests_processed || '0'}</div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-[10px] text-gray-400 uppercase tracking-widest mb-1">Proofs Generated</div>
+                                    <div className="text-xl font-mono text-[#00FFFF]">{nodeMetrics?.proofs_generated || '0'}</div>
+                                </div>
                             </div>
-                        </div>
-                        <div className="space-y-2 text-sm text-gray-300">
-                            <div className="flex justify-between">
-                                <span>CPU Usage</span>
-                                <span className="text-white">34%</span>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                                    <div className="text-[10px] text-gray-400 uppercase tracking-widest mb-1">TX Sent</div>
+                                    <div className="text-xl font-mono text-green-400 font-bold">{nodeMetrics?.transactions_sent || '0'}</div>
+                                </div>
+                                <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+                                    <div className="text-[10px] text-gray-400 uppercase tracking-widest mb-1">Aggregations</div>
+                                    <div className="text-xl font-mono text-purple-400 font-bold">{nodeMetrics?.aggregations_completed || '0'}</div>
+                                </div>
                             </div>
-                            <div className="flex justify-between">
-                                <span>Memory</span>
-                                <span className="text-white">12.4 GB</span>
-                            </div>
-                            <div className="flex justify-between">
-                                <span>Latency</span>
-                                <span className="text-[#00FFFF]">14ms</span>
+
+                            <div className="space-y-3">
+                                <div className="flex justify-between text-xs">
+                                    <span className="text-gray-400">Node Uptime</span>
+                                    <span className="text-white font-mono">{nodeMetrics ? Math.floor(nodeMetrics.uptime_seconds / 60) : 0}m {nodeMetrics ? Math.floor(nodeMetrics.uptime_seconds % 60) : 0}s</span>
+                                </div>
+                                <div className="flex justify-between text-xs">
+                                    <span className="text-gray-400">Verification Engine</span>
+                                    <span className="text-green-400 font-bold">ACTIVE</span>
+                                </div>
+                                <div className="flex justify-between text-xs">
+                                    <span className="text-gray-400">Outliers Dropped</span>
+                                    <span className="text-red-400 font-mono">{nodeMetrics?.outliers_detected || '0'}</span>
+                                </div>
                             </div>
                         </div>
                     </div>
