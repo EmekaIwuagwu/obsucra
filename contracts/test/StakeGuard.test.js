@@ -10,9 +10,9 @@ describe("StakeGuard Production Tests", function () {
     beforeEach(async function () {
         [owner, node1, node2, slasher] = await ethers.getSigners();
 
-        // Deploy Token
+        // Deploy Token (new constructor takes owner address)
         const ObscuraToken = await ethers.getContractFactory("ObscuraToken");
-        token = await ObscuraToken.deploy(INITIAL_SUPPLY);
+        token = await ObscuraToken.deploy(owner.address);
         await token.waitForDeployment();
 
         // Deploy StakeGuard

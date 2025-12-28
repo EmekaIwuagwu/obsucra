@@ -86,6 +86,24 @@ export class ObscuraSDK {
     }
 
     /**
+     * Fetches network-wide statistics (TVS, active nodes, uptime, etc.)
+     */
+    async getNetworkInfo() {
+        const response = await fetch(`${this.apiEndpoint}/api/network`);
+        if (!response.ok) throw new Error('Failed to fetch network info');
+        return await response.json();
+    }
+
+    /**
+     * Fetches blockchain status data for all supported chains.
+     */
+    async getChainStats() {
+        const response = await fetch(`${this.apiEndpoint}/api/chains`);
+        if (!response.ok) throw new Error('Failed to fetch chain stats');
+        return await response.json();
+    }
+
+    /**
      * Verifies a ZK Proof locally using the SDK verification engine.
      */
     async verifyProof(_proof: string, _publicInputs: any): Promise<boolean> {

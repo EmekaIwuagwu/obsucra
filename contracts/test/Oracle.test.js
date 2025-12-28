@@ -11,9 +11,9 @@ describe("ObscuraOracle Production Logic", function () {
     beforeEach(async function () {
         [owner, node1, node2, node3, requester] = await ethers.getSigners();
 
-        // 1. Deploy Token
+        // 1. Deploy Token (new constructor takes owner address)
         const ObscuraToken = await ethers.getContractFactory("ObscuraToken");
-        token = await ObscuraToken.deploy(INITIAL_SUPPLY);
+        token = await ObscuraToken.deploy(owner.address);
         await token.waitForDeployment();
 
         // 2. Deploy StakeGuard

@@ -107,9 +107,16 @@ const DataFlow = () => {
 
 const LandingPage: React.FC<{ onNavigate: (page: string) => void }> = ({ onNavigate }) => {
     const [feeds, setFeeds] = useState<any[]>([]);
+    const [networkStats, setNetworkStats] = useState({
+        total_value_secured: 0,
+        active_nodes: 0,
+        data_points_per_day: 0,
+        uptime_percent: 99.99
+    });
 
     useEffect(() => {
         const sdk = new ObscuraSDK();
+
         const fetchFeeds = async () => {
             try {
                 const data = await sdk.getFeeds();
@@ -125,8 +132,22 @@ const LandingPage: React.FC<{ onNavigate: (page: string) => void }> = ({ onNavig
                 console.error("LandingPage: Failed to fetch feeds", err);
             }
         };
+
+        const fetchNetworkStats = async () => {
+            try {
+                const data = await sdk.getNetworkInfo();
+                setNetworkStats(data);
+            } catch (err) {
+                console.error("LandingPage: Failed to fetch network stats", err);
+            }
+        };
+
         fetchFeeds();
-        const interval = setInterval(fetchFeeds, 5000);
+        fetchNetworkStats();
+        const interval = setInterval(() => {
+            fetchFeeds();
+            fetchNetworkStats();
+        }, 5000);
         return () => clearInterval(interval);
     }, []);
     return (
@@ -222,10 +243,10 @@ const LandingPage: React.FC<{ onNavigate: (page: string) => void }> = ({ onNavig
             <section className="py-20 bg-[#0A0A2A] relative">
                 <div className="max-w-7xl mx-auto px-6 grid grid-cols-1 md:grid-cols-4 gap-8 text-center">
                     {[
-                        { label: "Total Value Secured", val: "$4.2B+" },
-                        { label: "Active Nodes", val: "1,200+" },
-                        { label: "Data Points/Day", val: "8.5M" },
-                        { label: "Uptime", val: "99.99%" }
+                        { label: "Total Value Secured", val: networkStats.total_value_secured > 1000000000 ? `$${(networkStats.total_value_secured / 1000000000).toFixed(1)}B+` : networkStats.total_value_secured > 1000000 ? `$${(networkStats.total_value_secured / 1000000).toFixed(1)}M+` : `$${networkStats.total_value_secured.toLocaleString()}` },
+                        { label: "Active Nodes", val: networkStats.active_nodes > 0 ? `${networkStats.active_nodes.toLocaleString()}+` : "Syncing..." },
+                        { label: "Data Points/Day", val: networkStats.data_points_per_day > 1000000 ? `${(networkStats.data_points_per_day / 1000000).toFixed(1)}M` : networkStats.data_points_per_day > 1000 ? `${(networkStats.data_points_per_day / 1000).toFixed(1)}K` : `${networkStats.data_points_per_day}` },
+                        { label: "Uptime", val: `${networkStats.uptime_percent.toFixed(2)}%` }
                     ].map((s, i) => (
                         <div key={i}>
                             <div className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-br from-[#FFD700] to-[#FF4500] mb-2">{s.val}</div>

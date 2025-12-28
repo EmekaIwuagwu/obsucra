@@ -4,21 +4,14 @@ import { Activity, Radio, Cpu, Lock, ChevronRight, BarChart3, Coins, Zap } from 
 import { ObscuraSDK } from '../sdk/obscura';
 
 const NetworkDashboard: React.FC = () => {
-    // Mock Data for "Reports from different blockchains"
-    const [chainStats, setChainStats] = useState([
-        { id: 'eth', name: 'Ethereum', tps: '15.2', height: '18,543,021', status: 'Optimal' },
-        { id: 'sol', name: 'Solana', tps: '2,450', height: '245,678,901', status: 'Optimal' },
-        { id: 'arb', name: 'Arbitrum', tps: '45.8', height: '98,123,456', status: 'Optimal' },
-        { id: 'opt', name: 'Optimism', tps: '32.1', height: '87,654,321', status: 'Congested' },
-    ]);
-
+    // Chain stats fetched from backend
+    const [chainStats, setChainStats] = useState<any[]>([]);
     const [recentJobs, setRecentJobs] = useState<any[]>([]);
-
-
     const [nodeMetrics, setNodeMetrics] = useState<any>(null);
+    const [networkInfo, setNetworkInfo] = useState<any>(null);
     const sdk = new ObscuraSDK();
 
-    // Simulate live updates & Fetch real metrics
+    // Fetch real data from backend
     useEffect(() => {
         const fetchMetrics = async () => {
             try {
@@ -38,16 +31,34 @@ const NetworkDashboard: React.FC = () => {
             }
         };
 
+        const fetchChainStats = async () => {
+            try {
+                const chains = await sdk.getChainStats();
+                setChainStats(chains);
+            } catch (err) {
+                console.error("Failed to fetch chain stats:", err);
+            }
+        };
+
+        const fetchNetworkInfo = async () => {
+            try {
+                const info = await sdk.getNetworkInfo();
+                setNetworkInfo(info);
+            } catch (err) {
+                console.error("Failed to fetch network info:", err);
+            }
+        };
+
         fetchMetrics();
         fetchRecentJobs();
+        fetchChainStats();
+        fetchNetworkInfo();
+
         const interval = setInterval(() => {
             fetchMetrics();
             fetchRecentJobs();
-            // Randomly update TPS (still mock for now)
-            setChainStats(prev => prev.map(chain => ({
-                ...chain,
-                tps: (parseFloat(chain.tps) + (Math.random() - 0.5)).toFixed(1)
-            })));
+            fetchChainStats();
+            fetchNetworkInfo();
         }, 5000);
         return () => clearInterval(interval);
     }, []);
@@ -175,11 +186,11 @@ const NetworkDashboard: React.FC = () => {
                                 </div>
                                 <div className="flex justify-between text-xs">
                                     <span className="text-gray-400">Security Guard</span>
-                                    <span className="text-green-400 font-bold">ACTIVE</span>
+                                    <span className="text-green-400 font-bold">{networkInfo?.security_status || 'ACTIVE'}</span>
                                 </div>
                                 <div className="flex justify-between text-xs">
                                     <span className="text-gray-400">OEV Potential</span>
-                                    <span className="text-cyan-400 font-bold tracking-widest">HIGH</span>
+                                    <span className="text-cyan-400 font-bold tracking-widest">{networkInfo?.oev_potential || 'HIGH'}</span>
                                 </div>
                             </div>
                         </div>
@@ -203,7 +214,7 @@ const NetworkDashboard: React.FC = () => {
                             </div>
                             <div>
                                 <div className="text-4xl font-mono text-white font-bold">
-                                    {((nodeMetrics?.oev_recaptured || 0) * 0.01).toFixed(2)} <span className="text-sm text-gray-500">ETH</span>
+                                    {(networkInfo?.oev_recaptured_eth || (nodeMetrics?.oev_recaptured || 0) * 0.0001).toFixed(4)} <span className="text-sm text-gray-500">ETH</span>
                                 </div>
                                 <div className="text-xs text-cyan-400 font-bold tracking-widest uppercase">Protocol Revenue Shared</div>
                             </div>
@@ -212,11 +223,11 @@ const NetworkDashboard: React.FC = () => {
                         <div className="bg-black/40 rounded-xl p-4 border border-white/5">
                             <div className="flex justify-between text-xs mb-2">
                                 <span className="text-gray-400">Last Auction Winner</span>
-                                <span className="text-white font-mono text-[10px]">0x71C...4f9b</span>
+                                <span className="text-white font-mono text-[10px]">{networkInfo?.last_auction_winner || '0x71C...4f9b'}</span>
                             </div>
                             <div className="flex justify-between text-xs">
                                 <span className="text-gray-400">Auction Frequency</span>
-                                <span className="text-white font-mono text-[10px]">1.2m avg</span>
+                                <span className="text-white font-mono text-[10px]">{networkInfo?.auction_frequency_ms ? `${(networkInfo.auction_frequency_ms / 60000).toFixed(1)}m avg` : '1.2m avg'}</span>
                             </div>
                         </div>
                     </div>

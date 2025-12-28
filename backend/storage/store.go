@@ -15,6 +15,7 @@ type Store interface {
 	SaveReputation(nodeID string, score float64) error
 	GetReputation(nodeID string) float64
 	GetAllJobs() map[string]interface{}
+	Clear() error
 	Close() error
 }
 
@@ -114,4 +115,19 @@ func (fs *FileStore) GetAllJobs() map[string]interface{} {
 
 func (fs *FileStore) Close() error {
 	return fs.flush()
+}
+
+// Clear resets all data and removes the storage file (useful for tests)
+func (fs *FileStore) Clear() error {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	
+	fs.Data.Jobs = make(map[string]interface{})
+	fs.Data.Reputation = make(map[string]float64)
+	
+	// Remove the file
+	if err := os.Remove(fs.filename); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }

@@ -7,12 +7,29 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 interface IStakeGuard {
-    function stakers(address) external view returns (uint256 balance, uint256 lastStakeTime, uint256 reputation, bool isActive);
-    function slash(address _node, uint256 _amount, string calldata _reason) external;
+    function stakers(
+        address
+    )
+        external
+        view
+        returns (
+            uint256 balance,
+            uint256 lastStakeTime,
+            uint256 reputation,
+            bool isActive
+        );
+    function slash(
+        address _node,
+        uint256 _amount,
+        string calldata _reason
+    ) external;
 }
 
 interface IVerifier {
-    function verifyProof(uint256[8] calldata proof, uint256[2] calldata input) external view;
+    function verifyProof(
+        uint256[8] calldata proof,
+        uint256[2] calldata input
+    ) external view;
 }
 
 contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
@@ -24,13 +41,13 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
     IVerifier public verifier;
 
     // Configuration
-    uint256 public paymentFee = 1 * 10**18; // 1 OBSCURA per request
+    uint256 public paymentFee = 1 * 10 ** 18; // 1 OBSCURA per request
     uint256 public minResponses = 1; // Minimum responses to aggregate
     uint256 public constant TIMEOUT = 1 hours;
     uint256 public constant REWARD_PERCENT = 90; // 90% goes to nodes
     uint256 public constant MAX_DEVIATION = 50; // 50% max deviation
-    uint256 public constant SLASH_AMOUNT = 10 * 10**18; // 10 OBSCURA penalty
-    
+    uint256 public constant SLASH_AMOUNT = 10 * 10 ** 18; // 10 OBSCURA penalty
+
     mapping(address => bool) public whitelistedNodes;
     mapping(address => uint256) public nodeRewards;
 
@@ -55,11 +72,12 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         string apiUrl;
         address requester;
         address oevBeneficiary; // The address that receives the MEV kickback
-        bool oevEnabled;        // Whether this request is an OEV-positive request
-        bool isOptimistic;     // True if fulfilled without ZK proof first
-        uint256 challengeWindow;// Timestamp until which the result can be disputed
-        address disputer;       // Address of the challenger
-        bool isDisputed;        // Status of the dispute
+        bool oevEnabled; // Whether this request is an OEV-positive request
+        bool isOptimistic; // True if fulfilled without ZK proof first
+        uint256 challengeWindow; // Timestamp until which the result can be disputed
+        address disputer; // Address of the challenger
+        bool isDisputed; // Status of the dispute
+        bool resolved; // Whether the request has been finalized
         uint256 finalValue;
         uint256 createdAt;
         uint256 minThreshold;
@@ -69,7 +87,7 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         mapping(address => bool) hasResponded;
     }
 
-    mapping(address => uint256) public oevEarnings; 
+    mapping(address => uint256) public oevEarnings;
     uint256 public constant DISPUTE_BOND = 100 * 1e18; // 100 OBS tokens to dispute
     uint256 public constant CHALLENGE_PERIOD = 30 minutes;
 
@@ -77,24 +95,44 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
     mapping(uint256 => Request) public requests;
 
     event RequestData(
-        uint256 indexed requestId, 
-        string apiUrl, 
-        uint256 min, 
-        uint256 max, 
+        uint256 indexed requestId,
+        string apiUrl,
+        uint256 min,
+        uint256 max,
         address indexed requester,
         bool oevEnabled,
         address oevBeneficiary,
         bool isOptimistic
     );
-    event DataSubmitted(uint256 indexed requestId, address indexed node, uint256 value);
+    event DataSubmitted(
+        uint256 indexed requestId,
+        address indexed node,
+        uint256 value
+    );
     event RequestFulfilled(uint256 indexed requestId, uint256 finalValue);
     event NewRound(uint80 indexed roundId, int256 answer, uint256 updatedAt);
-    event OEVCaptured(uint256 indexed requestId, address indexed beneficiary, uint256 amount);
-    event OptimisticFulfillment(uint256 indexed requestId, uint256 value, uint256 deadline);
-    event ChallengeRaised(uint256 indexed requestId, address indexed challenger, uint256 bond);
+    event OEVCaptured(
+        uint256 indexed requestId,
+        address indexed beneficiary,
+        uint256 amount
+    );
+    event OptimisticFulfillment(
+        uint256 indexed requestId,
+        uint256 value,
+        uint256 deadline
+    );
+    event ChallengeRaised(
+        uint256 indexed requestId,
+        address indexed challenger,
+        uint256 bond
+    );
     event DisputeResolved(uint256 indexed requestId, bool success);
-    
-    event RandomnessRequested(uint256 indexed requestId, string seed, address indexed requester);
+
+    event RandomnessRequested(
+        uint256 indexed requestId,
+        string seed,
+        address indexed requester
+    );
     event RandomnessFulfilled(uint256 indexed requestId, uint256 randomness);
 
     struct RandomnessRequest {
@@ -110,7 +148,7 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
     constructor(address _token, address _stakeGuard, address _verifier) {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(ADMIN_ROLE, msg.sender);
-        
+
         obscuraToken = IERC20(_token);
         stakeGuard = IStakeGuard(_stakeGuard);
         verifier = IVerifier(_verifier);
@@ -134,7 +172,10 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         verifier = IVerifier(_verifier);
     }
 
-    function setNodeWhitelist(address _node, bool _status) external onlyRole(ADMIN_ROLE) {
+    function setNodeWhitelist(
+        address _node,
+        bool _status
+    ) external onlyRole(ADMIN_ROLE) {
         whitelistedNodes[_node] = _status;
     }
 
@@ -149,12 +190,13 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
     // --- Core Logic ---
 
     function requestData(
-        string calldata apiUrl, 
-        uint256 min, 
-        uint256 max, 
+        string calldata apiUrl,
+        uint256 min,
+        uint256 max,
         string calldata metadata
     ) external whenNotPaused nonReentrant returns (uint256) {
-        return _requestDataInternal(apiUrl, min, max, metadata, address(0), false);
+        return
+            _requestDataInternal(apiUrl, min, max, metadata, address(0), false);
     }
 
     /**
@@ -169,7 +211,8 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         address beneficiary
     ) external whenNotPaused nonReentrant returns (uint256) {
         require(beneficiary != address(0), "Invalid OEV beneficiary");
-        return _requestDataInternal(apiUrl, min, max, metadata, beneficiary, true);
+        return
+            _requestDataInternal(apiUrl, min, max, metadata, beneficiary, true);
     }
 
     function _requestDataInternal(
@@ -181,7 +224,10 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         bool oevEnabled
     ) internal returns (uint256) {
         // Collect Payment
-        require(obscuraToken.transferFrom(msg.sender, address(this), paymentFee), "Fee payment failed");
+        require(
+            obscuraToken.transferFrom(msg.sender, address(this), paymentFee),
+            "Fee payment failed"
+        );
 
         uint256 requestId = nextRequestId++;
         Request storage req = requests[requestId];
@@ -194,15 +240,24 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         req.minThreshold = min;
         req.maxThreshold = max;
         req.metadata = metadata;
-        
-        emit RequestData(requestId, apiUrl, min, max, msg.sender);
+
+        emit RequestData(
+            requestId,
+            apiUrl,
+            min,
+            max,
+            msg.sender,
+            oevEnabled,
+            beneficiary,
+            false
+        );
         return requestId;
     }
 
     function fulfillData(
-        uint256 requestId, 
-        uint256 value, 
-        uint256[8] calldata zkpProof, 
+        uint256 requestId,
+        uint256 value,
+        uint256[8] calldata zkpProof,
         uint256[2] calldata publicInputs
     ) external whenNotPaused nonReentrant {
         _fulfillDataInternal(requestId, value, zkpProof, publicInputs, 0);
@@ -236,18 +291,26 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         req.isOptimistic = true;
         req.finalValue = value;
         req.challengeWindow = block.timestamp + CHALLENGE_PERIOD;
-        
+
         emit OptimisticFulfillment(requestId, value, req.challengeWindow);
     }
 
-    function disputeFulfillment(uint256 requestId) external whenNotPaused nonReentrant {
+    function disputeFulfillment(
+        uint256 requestId
+    ) external whenNotPaused nonReentrant {
         Request storage req = requests[requestId];
         require(req.isOptimistic, "Not an optimistic fulfillment");
-        require(block.timestamp <= req.challengeWindow, "Challenge window closed");
+        require(
+            block.timestamp <= req.challengeWindow,
+            "Challenge window closed"
+        );
         require(!req.isDisputed, "Already disputed");
 
-        require(obscuraToken.transferFrom(msg.sender, address(this), DISPUTE_BOND), "Bond required");
-        
+        require(
+            obscuraToken.transferFrom(msg.sender, address(this), DISPUTE_BOND),
+            "Bond required"
+        );
+
         req.isDisputed = true;
         req.disputer = msg.sender;
 
@@ -263,46 +326,52 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         require(req.isDisputed, "No active dispute");
 
         // Verify the ZK proof against the value that was posted optimistically
-        bool isValid = verifier.verifyProof(
-            [zkpProof[0], zkpProof[1]],
-            [[zkpProof[2], zkpProof[3]], [zkpProof[4], zkpProof[5]]],
-            [zkpProof[6], zkpProof[7]],
-            publicInputs
-        );
-
-        if (isValid && publicInputs[0] <= req.finalValue && publicInputs[1] >= req.finalValue) {
+        bool isValid = true;
+        try verifier.verifyProof(zkpProof, publicInputs) {
+            isValid = true;
+        } catch {
+            isValid = false;
+        }
+        if (
+            isValid &&
+            publicInputs[0] <= req.finalValue &&
+            publicInputs[1] >= req.finalValue
+        ) {
             // Node was correct! Slashing challenger, rewarding node.
             obscuraToken.transfer(msg.sender, DISPUTE_BOND); // Return bond + reward? For MVP just return bond.
             emit DisputeResolved(requestId, true);
         } else {
             // Node was WRONG or proof failed. Slashing node, rewarding challenger.
             // stakeGuard.slash(nodeAddr, amount); // Production logic
-            obscuraToken.transfer(req.disputer, DISPUTE_BOND * 2); 
+            obscuraToken.transfer(req.disputer, DISPUTE_BOND * 2);
             req.finalValue = 0; // Invalidate result
             emit DisputeResolved(requestId, false);
         }
-        
+
         req.isDisputed = false;
         req.isOptimistic = false; // Finalized via ZK
     }
 
     function _handleOEV(Request storage req, uint256 oevBid) internal {
         require(oevBid > 0, "Bid required for OEV fulfillment");
-        require(obscuraToken.transferFrom(msg.sender, address(this), oevBid), "OEV bid transfer failed");
+        require(
+            obscuraToken.transferFrom(msg.sender, address(this), oevBid),
+            "OEV bid transfer failed"
+        );
         oevEarnings[req.oevBeneficiary] += oevBid;
         emit OEVCaptured(req.id, req.oevBeneficiary, oevBid);
     }
 
     function _fulfillDataInternal(
-        uint256 requestId, 
-        uint256 value, 
-        uint256[8] calldata zkpProof, 
+        uint256 requestId,
+        uint256 value,
+        uint256[8] calldata zkpProof,
         uint256[2] calldata publicInputs,
         uint256 /* oevBid */
     ) internal {
         // 1. Authorization Check
         require(whitelistedNodes[msg.sender], "Not whitelisted");
-        (,,, bool isActive) = stakeGuard.stakers(msg.sender);
+        (, , , bool isActive) = stakeGuard.stakers(msg.sender);
         require(isActive, "Node not active in StakeGuard");
 
         Request storage req = requests[requestId];
@@ -315,10 +384,7 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         }
 
         // 3. Record Response
-        req.responses.push(Response({
-            node: msg.sender,
-            value: value
-        }));
+        req.responses.push(Response({node: msg.sender, value: value}));
         req.hasResponded[msg.sender] = true;
 
         emit DataSubmitted(requestId, msg.sender, value);
@@ -331,15 +397,15 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
 
     function _aggregateAndFinalize(uint256 requestId) internal {
         Request storage req = requests[requestId];
-        
+
         // Simple Median Aggregation
         uint256[] memory values = new uint256[](req.responses.length);
-        for(uint256 i = 0; i < req.responses.length; i++) {
+        for (uint256 i = 0; i < req.responses.length; i++) {
             values[i] = req.responses[i].value;
         }
-        
+
         uint256 medianValue = _calculateMedian(values);
-        
+
         req.finalValue = medianValue;
         req.resolved = true;
 
@@ -358,16 +424,18 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         if (req.responses.length > 0) {
             uint256 totalReward = (paymentFee * REWARD_PERCENT) / 100;
             uint256 rewardPerNode = totalReward / req.responses.length;
-            
-            for(uint256 i = 0; i < req.responses.length; i++) {
+
+            for (uint256 i = 0; i < req.responses.length; i++) {
                 address node = req.responses[i].node;
                 uint256 val = req.responses[i].value;
-                
+
                 // Outlier check
                 bool isOutlier = false;
                 if (medianValue > 0) {
-                    if (val > (medianValue * (100 + MAX_DEVIATION)) / 100 || 
-                        val < (medianValue * (100 - MAX_DEVIATION)) / 100) {
+                    if (
+                        val > (medianValue * (100 + MAX_DEVIATION)) / 100 ||
+                        val < (medianValue * (100 - MAX_DEVIATION)) / 100
+                    ) {
                         isOutlier = true;
                     }
                 } else if (val > 0) {
@@ -376,7 +444,13 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
 
                 if (isOutlier) {
                     // Slash
-                    try stakeGuard.slash(node, SLASH_AMOUNT, "Price deviation outlier") {} catch {}
+                    try
+                        stakeGuard.slash(
+                            node,
+                            SLASH_AMOUNT,
+                            "Price deviation outlier"
+                        )
+                    {} catch {}
                 } else {
                     // Reward
                     nodeRewards[node] += rewardPerNode;
@@ -387,22 +461,25 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         emit RequestFulfilled(requestId, medianValue);
     }
 
-    function _calculateMedian(uint256[] memory values) internal pure returns (uint256) {
+    function _calculateMedian(
+        uint256[] memory values
+    ) internal pure returns (uint256) {
         // Sort
-        for(uint256 i = 0; i < values.length; i++) {
-            for(uint256 j = i + 1; j < values.length; j++) {
-                if(values[i] > values[j]) {
+        for (uint256 i = 0; i < values.length; i++) {
+            for (uint256 j = i + 1; j < values.length; j++) {
+                if (values[i] > values[j]) {
                     uint256 temp = values[i];
                     values[i] = values[j];
                     values[j] = temp;
                 }
             }
         }
-        
+
         if (values.length % 2 == 0) {
-            return (values[values.length/2 - 1] + values[values.length/2]) / 2;
+            return
+                (values[values.length / 2 - 1] + values[values.length / 2]) / 2;
         } else {
-            return values[values.length/2];
+            return values[values.length / 2];
         }
     }
 
@@ -413,28 +490,50 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
 
     // --- Chainlink Compatibility ---
 
-    function latestRoundData() external view returns (
-        uint80 roundId,
-        int256 answer,
-        uint256 startedAt,
-        uint256 updatedAt,
-        uint80 answeredInRound
-    ) {
+    function latestRoundData()
+        external
+        view
+        returns (
+            uint80 roundId,
+            int256 answer,
+            uint256 startedAt,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        )
+    {
         require(latestRoundId > 0, "No rounds exist");
         Round storage r = rounds[latestRoundId];
-        return (r.roundId, r.answer, r.startedAt, r.updatedAt, r.answeredInRound);
+        return (
+            r.roundId,
+            r.answer,
+            r.startedAt,
+            r.updatedAt,
+            r.answeredInRound
+        );
     }
 
-    function getRoundData(uint80 _roundId) external view returns (
-        uint80 roundId,
-        int256 answer,
-        uint256 startedAt,
-        uint256 updatedAt,
-        uint80 answeredInRound
-    ) {
+    function getRoundData(
+        uint80 _roundId
+    )
+        external
+        view
+        returns (
+            uint80 roundId,
+            int256 answer,
+            uint256 startedAt,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        )
+    {
         require(_roundId <= latestRoundId && _roundId > 0, "Invalid round ID");
         Round storage r = rounds[_roundId];
-        return (r.roundId, r.answer, r.startedAt, r.updatedAt, r.answeredInRound);
+        return (
+            r.roundId,
+            r.answer,
+            r.startedAt,
+            r.updatedAt,
+            r.answeredInRound
+        );
     }
 
     function decimals() external pure returns (uint8) {
@@ -472,7 +571,10 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         Request storage req = requests[requestId];
         require(req.requester == msg.sender, "Not the requester");
         require(!req.resolved, "Already resolved");
-        require(block.timestamp > req.createdAt + TIMEOUT, "Timeout not reached");
+        require(
+            block.timestamp > req.createdAt + TIMEOUT,
+            "Timeout not reached"
+        );
 
         req.resolved = true; // Mark as "resolved" to prevent further submissions
         // Refund full fee (or minus small penalty? For now full refund)
@@ -492,13 +594,21 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         uint256 amount = oevEarnings[msg.sender];
         require(amount > 0, "No OEV earnings to claim");
         oevEarnings[msg.sender] = 0;
-        require(obscuraToken.transfer(msg.sender, amount), "OEV transfer failed");
+        require(
+            obscuraToken.transfer(msg.sender, amount),
+            "OEV transfer failed"
+        );
     }
 
     // --- VRF Logic ---
 
-    function requestRandomness(string calldata seed) external whenNotPaused nonReentrant returns (uint256) {
-        require(obscuraToken.transferFrom(msg.sender, address(this), paymentFee), "Fee payment failed");
+    function requestRandomness(
+        string calldata seed
+    ) external whenNotPaused nonReentrant returns (uint256) {
+        require(
+            obscuraToken.transferFrom(msg.sender, address(this), paymentFee),
+            "Fee payment failed"
+        );
 
         uint256 requestId = nextRandomnessId++;
         RandomnessRequest storage req = randomnessRequests[requestId];
@@ -509,9 +619,13 @@ contract ObscuraOracle is AccessControl, Pausable, ReentrancyGuard {
         return requestId;
     }
 
-    function fulfillRandomness(uint256 requestId, uint256 randomness, bytes calldata /* proof */) external whenNotPaused nonReentrant {
+    function fulfillRandomness(
+        uint256 requestId,
+        uint256 randomness,
+        bytes calldata /* proof */
+    ) external whenNotPaused nonReentrant {
         require(whitelistedNodes[msg.sender], "Not whitelisted");
-        (,,, bool isActive) = stakeGuard.stakers(msg.sender);
+        (, , , bool isActive) = stakeGuard.stakers(msg.sender);
         require(isActive, "Node not active");
 
         RandomnessRequest storage req = randomnessRequests[requestId];

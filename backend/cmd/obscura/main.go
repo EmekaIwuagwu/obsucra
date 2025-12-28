@@ -3,7 +3,11 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
+	"github.com/obscura-network/obscura-node/api"
+	"github.com/obscura-network/obscura-node/oracle"
 	"github.com/spf13/cobra"
 )
 
@@ -18,9 +22,46 @@ var startCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the Obscura Node",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("🚀 Initializing Obscura Node...")
-		fmt.Println("🔗 Connecting to Mesh...")
-		// Logic to start the node from backend/main.go
+		fmt.Println("🚀 Initializing Obscura Node API Server...")
+		fmt.Println("🔗 Starting Metrics Server on :8080...")
+
+		// Create metrics collector and feed manager
+		collector := api.NewMetricsCollector()
+		feedManager := oracle.NewFeedManager()
+
+		// Register demo feeds
+		feedManager.RegisterFeed(&oracle.FeedConfig{
+			ID:     "ETH-USD",
+			Name:   "Ethereum / US Dollar",
+			Active: true,
+		})
+		feedManager.RegisterFeed(&oracle.FeedConfig{
+			ID:     "BTC-USD",
+			Name:   "Bitcoin / US Dollar",
+			Active: true,
+		})
+
+		// Create and start server
+		server := api.NewMetricsServer(collector, feedManager, "8080")
+
+		// Handle shutdown gracefully
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+		go func() {
+			<-sigChan
+			fmt.Println("\n🛑 Shutting down...")
+			os.Exit(0)
+		}()
+
+		fmt.Println("✅ API Server running at http://localhost:8080")
+		fmt.Println("   Endpoints: /api/stats, /api/feeds, /api/jobs, /api/network, /api/chains")
+		fmt.Println("   Press Ctrl+C to stop")
+
+		if err := server.Start(); err != nil {
+			fmt.Printf("❌ Server error: %v\n", err)
+			os.Exit(1)
+		}
 	},
 }
 

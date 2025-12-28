@@ -1,16 +1,262 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Terminal, Copy, Check, Code, BookOpen, Layers } from 'lucide-react';
+import { Terminal, Copy, Check, Code, BookOpen, Layers, ExternalLink, Play, ChevronRight, Database, Shield, Globe } from 'lucide-react';
+
+interface ApiEndpoint {
+    method: 'GET' | 'POST';
+    path: string;
+    description: string;
+    response?: string;
+    params?: { name: string; type: string; required: boolean; description: string }[];
+}
 
 const Developers: React.FC = () => {
     const [copied, setCopied] = useState(false);
     const [activeSection, setActiveSection] = useState<'quickstart' | 'docs' | 'api' | 'examples'>('quickstart');
+    const [apiResponse, setApiResponse] = useState<string | null>(null);
+    const [loadingApi, setLoadingApi] = useState(false);
+    const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
 
-    const handleCopy = () => {
-        navigator.clipboard.writeText('npm install @obscura-network/sdk ethers');
+    const handleCopy = (text: string) => {
+        navigator.clipboard.writeText(text);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
+
+    const testApiEndpoint = async (endpoint: string) => {
+        setLoadingApi(true);
+        setApiResponse(null);
+        try {
+            const response = await fetch(`http://localhost:8080${endpoint}`);
+            const data = await response.json();
+            setApiResponse(JSON.stringify(data, null, 2));
+        } catch (err) {
+            setApiResponse(JSON.stringify({ error: 'Failed to fetch. Make sure the backend is running on localhost:8080' }, null, 2));
+        }
+        setLoadingApi(false);
+    };
+
+    const apiEndpoints: ApiEndpoint[] = [
+        {
+            method: 'GET',
+            path: '/api/stats',
+            description: 'Returns node telemetry including uptime, proofs generated, and OEV recaptured.',
+            response: '{ "uptime": "99.97%", "totalProofs": 15847, "oevRecaptured": "$124,567" }'
+        },
+        {
+            method: 'GET',
+            path: '/api/feeds',
+            description: 'Returns list of active data feeds with live values, confidence intervals, and ZK status.',
+            response: '[{ "id": "ETH-USD", "value": "3847.52", "confidence": 99.2, "isZKVerified": true }]'
+        },
+        {
+            method: 'GET',
+            path: '/api/jobs',
+            description: 'Returns the last 50 processed oracle requests (Price Feeds, VRF, ZK Compute).',
+            response: '[{ "id": "job-123", "type": "PriceFeed", "status": "completed", "latency": "45ms" }]'
+        },
+        {
+            method: 'GET',
+            path: '/api/proposals',
+            description: 'Returns the list of community governance proposals for the DAO.',
+            response: '[{ "id": 1, "title": "Increase Rewards", "status": "Active", "votes_for": 72 }]'
+        },
+        {
+            method: 'GET',
+            path: '/api/network',
+            description: 'Returns network-wide statistics including TVL, active nodes, and throughput.',
+            response: '{ "totalValueSecured": "$2.4B", "activeNodes": 47, "dataPointsPerDay": 1250000 }'
+        },
+        {
+            method: 'GET',
+            path: '/api/chains',
+            description: 'Returns supported blockchain status with TPS, block height, and latency.',
+            response: '[{ "id": "eth", "name": "Ethereum", "tps": "12.5", "status": "Optimal" }]'
+        },
+    ];
+
+    const docSections = [
+        {
+            id: 'architecture',
+            title: 'Architecture Overview',
+            summary: 'Learn how Obscura Nodes communicate via LibP2P and aggregate data using recursive SNARKs.',
+            content: `
+## Obscura Network Architecture
+
+The Obscura Network consists of three main layers:
+
+### 1. Data Layer
+- **External Adapters**: Connect to CoinGecko, Binance, CoinMarketCap, and institutional APIs
+- **Privacy Layer**: ZK-proofs ensure data validity without revealing source details
+- **Aggregation**: Median-based consensus across multiple data sources
+
+### 2. Node Layer  
+- **LibP2P Transport**: Decentralized peer-to-peer communication
+- **Consensus Engine**: BFT-based agreement on data values
+- **TEE Integration**: Trusted Execution Environments for sensitive computations
+
+### 3. Settlement Layer
+- **Multi-chain Support**: Ethereum, Arbitrum, Optimism, Base
+- **Smart Contracts**: ObscuraOracle, StakeGuard, NodeRegistry
+- **OEV Recapture**: Automated MEV redistribution to users
+            `
+        },
+        {
+            id: 'contracts',
+            title: 'Smart Contracts',
+            summary: 'Solidity interfaces for ObscuraOracle.sol, StakeGuard.sol, and NodeRegistry.sol.',
+            content: `
+## Smart Contract Interfaces
+
+### ObscuraOracle.sol
+\`\`\`solidity
+interface IObscuraOracle {
+    function latestRoundData() external view returns (
+        uint80 roundId,
+        int256 answer,
+        uint256 startedAt,
+        uint256 updatedAt,
+        uint80 answeredInRound
+    );
+    
+    function requestData(
+        string calldata apiUrl,
+        uint256 min,
+        uint256 max,
+        string calldata metadata
+    ) external returns (uint256 requestId);
+    
+    function requestRandomness(string calldata seed) 
+        external returns (uint256 requestId);
+}
+\`\`\`
+
+### StakeGuard.sol
+\`\`\`solidity
+interface IStakeGuard {
+    function stake(uint256 amount) external;
+    function unstake(uint256 amount) external;
+    function slash(address node, uint256 amount, string reason) external;
+    function stakers(address) external view returns (
+        uint256 balance,
+        uint256 unbondTime,
+        int256 reputation,
+        bool isActive
+    );
+}
+\`\`\`
+
+### NodeRegistry.sol
+\`\`\`solidity
+interface INodeRegistry {
+    function registerNode(
+        string name,
+        string endpoint,
+        bytes32 publicKey
+    ) external;
+    function getActiveNodes() external view returns (address[]);
+    function startConsensus(bytes32 requestId) external;
+}
+\`\`\`
+            `
+        },
+        {
+            id: 'security',
+            title: 'Security Model',
+            summary: 'Understanding slashing conditions, reputation scores, and TEE attestation.',
+            content: `
+## Security Model
+
+### Slashing Conditions
+Nodes can be slashed for:
+1. **Price Deviation**: Submitting values >5% from median
+2. **Downtime**: Missing >10% of assigned requests
+3. **Byzantine Behavior**: Detected through ZK fraud proofs
+
+### Reputation System
+- New nodes start at 50% reputation (5000/10000)
+- Successful jobs increase reputation by 1%
+- Failed/slashed jobs decrease by 2-5%
+- Minimum 30% reputation required for consensus participation
+
+### TEE Attestation
+- Intel SGX enclaves for sensitive API key storage
+- Remote attestation before node activation
+- Secure key derivation for ZK proof generation
+            `
+        },
+        {
+            id: 'zkproofs',
+            title: 'Zero-Knowledge Proofs',
+            summary: 'Groth16 circuits for range proofs, VRF proofs, and cross-chain bridge proofs.',
+            content: `
+## ZK Proof System
+
+### Supported Circuits
+
+#### 1. Range Proof
+Proves a value is within bounds without revealing the exact value.
+\`\`\`
+Circuit: RangeProofCircuit
+Inputs: Value (private), Min, Max (public)
+Proof Size: ~192 bytes
+Verification Gas: ~250,000
+\`\`\`
+
+#### 2. VRF Proof
+Verifiable Random Function for provably fair randomness.
+\`\`\`
+Circuit: VRFProofCircuit  
+Inputs: Seed, PrivateKey (private), PublicKey (public)
+Output: RandomValue, Proof
+\`\`\`
+
+#### 3. Bridge Proof
+Cross-chain state verification.
+\`\`\`
+Circuit: BridgeProofCircuit
+Inputs: SourceChainState, MerkleProof (private)
+Output: ValidatedState
+\`\`\`
+
+### Libraries Used
+- **gnark**: Go-based ZK library
+- **Groth16**: Proving system
+- **BN254**: Elliptic curve
+            `
+        }
+    ];
+
+    const exampleApps = [
+        {
+            title: 'Prediction Market',
+            description: 'A decentralized betting platform using Obscura for sports results and election outcomes.',
+            github: 'github.com/obscura/examples/prediction-market',
+            features: ['Real-time price feeds', 'VRF for fair resolution', 'OEV protection'],
+            language: 'Solidity + React'
+        },
+        {
+            title: 'Private Identity',
+            description: 'KYC verification where user data never leaves the device. ZK proofs verify age/location.',
+            github: 'github.com/obscura/examples/private-identity',
+            features: ['ZK age verification', 'On-device processing', 'GDPR compliant'],
+            language: 'TypeScript + circom'
+        },
+        {
+            title: 'DeFi Lending',
+            description: 'Collateralized lending protocol with ZK-verified price feeds and liquidation protection.',
+            github: 'github.com/obscura/examples/defi-lending',
+            features: ['Chainlink-compatible', 'Multi-asset support', 'Flash loan protection'],
+            language: 'Solidity + Hardhat'
+        },
+        {
+            title: 'NFT Lottery',
+            description: 'Fair NFT distribution using Obscura VRF for provably random winner selection.',
+            github: 'github.com/obscura/examples/nft-lottery',
+            features: ['VRF randomness', 'On-chain verification', 'Gas optimized'],
+            language: 'Solidity + ethers.js'
+        }
+    ];
 
     return (
         <div className="p-8 pt-12 min-h-screen">
@@ -55,7 +301,7 @@ const Developers: React.FC = () => {
                             <div className="bg-black/40 border border-white/10 rounded-xl p-4 flex justify-between items-center group hover:border-[#00FFFF]/50 transition-colors">
                                 <code className="text-gray-300 font-mono text-sm">npm install @obscura-network/sdk ethers</code>
                                 <button
-                                    onClick={handleCopy}
+                                    onClick={() => handleCopy('npm install @obscura-network/sdk ethers')}
                                     className="text-gray-500 hover:text-white transition-colors"
                                 >
                                     {copied ? <Check size={18} className="text-green-400" /> : <Copy size={18} />}
@@ -106,86 +352,139 @@ console.log('Verified Price:', price.value);`}</pre>
                 )}
 
                 {activeSection === 'docs' && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="card-glass p-12 min-h-[400px]">
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
                         <h3 className="text-3xl font-bold text-white mb-6">Core Documentation</h3>
-                        <div className="space-y-6 text-gray-300">
-                            <div className="p-4 border border-white/10 rounded-lg hover:bg-white/5 cursor-pointer">
-                                <h4 className="font-bold text-[#00FFFF] mb-2">Architecture Overview</h4>
-                                <p className="text-sm">Learn how Obscura Nodes communicate via LibP2P and aggregate data using recursive SNARKs.</p>
+                        {docSections.map((doc) => (
+                            <div key={doc.id} className="card-glass overflow-hidden">
+                                <button
+                                    onClick={() => setExpandedDoc(expandedDoc === doc.id ? null : doc.id)}
+                                    className="w-full p-6 flex justify-between items-center hover:bg-white/5 transition-colors"
+                                >
+                                    <div className="text-left">
+                                        <h4 className="font-bold text-[#00FFFF] mb-1">{doc.title}</h4>
+                                        <p className="text-sm text-gray-400">{doc.summary}</p>
+                                    </div>
+                                    <ChevronRight className={`text-gray-400 transition-transform ${expandedDoc === doc.id ? 'rotate-90' : ''}`} />
+                                </button>
+                                {expandedDoc === doc.id && (
+                                    <motion.div
+                                        initial={{ height: 0, opacity: 0 }}
+                                        animate={{ height: 'auto', opacity: 1 }}
+                                        className="px-6 pb-6 border-t border-white/10"
+                                    >
+                                        <div className="prose prose-invert prose-sm max-w-none pt-4">
+                                            <pre className="bg-black/40 rounded-xl p-4 overflow-x-auto text-sm text-gray-300 whitespace-pre-wrap">
+                                                {doc.content}
+                                            </pre>
+                                        </div>
+                                    </motion.div>
+                                )}
                             </div>
-                            <div className="p-4 border border-white/10 rounded-lg hover:bg-white/5 cursor-pointer">
-                                <h4 className="font-bold text-[#00FFFF] mb-2">Smart Contracts</h4>
-                                <p className="text-sm">Solidity interfaces for ObscuraOracle.sol, StakeGuard.sol, and VRF.sol.</p>
-                            </div>
-                            <div className="p-4 border border-white/10 rounded-lg hover:bg-white/5 cursor-pointer">
-                                <h4 className="font-bold text-[#00FFFF] mb-2">Security Model</h4>
-                                <p className="text-sm">Understanding slashing conditions, reputation scores, and TEE attestation.</p>
-                            </div>
-                        </div>
+                        ))}
                     </motion.div>
                 )}
 
                 {activeSection === 'api' && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="card-glass p-12 min-h-[400px]">
-                        <h3 className="text-3xl font-bold text-white mb-6">API Reference (v1.0)</h3>
-                        <div className="font-mono text-sm space-y-10">
-                            <div>
-                                <div className="flex items-center gap-2 mb-2">
-                                    <span className="px-2 py-1 bg-green-900 text-green-400 rounded">GET</span>
-                                    <span className="text-white">/api/stats</span>
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-3xl font-bold text-white">API Reference (v1.0)</h3>
+                            <span className="px-3 py-1 bg-green-900/30 text-green-400 rounded-full text-xs font-bold">
+                                Base URL: http://localhost:8080
+                            </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4">
+                            {apiEndpoints.map((endpoint, idx) => (
+                                <div key={idx} className="card-glass p-6">
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className="flex items-center gap-3">
+                                            <span className={`px-2 py-1 rounded text-xs font-bold ${endpoint.method === 'GET' ? 'bg-green-900 text-green-400' : 'bg-blue-900 text-blue-400'}`}>
+                                                {endpoint.method}
+                                            </span>
+                                            <code className="text-white font-mono">{endpoint.path}</code>
+                                        </div>
+                                        <button
+                                            onClick={() => testApiEndpoint(endpoint.path)}
+                                            className="px-3 py-1 bg-[#00FFFF]/10 border border-[#00FFFF]/30 rounded text-xs font-bold text-[#00FFFF] hover:bg-[#00FFFF] hover:text-black transition-all flex items-center gap-1"
+                                        >
+                                            <Play size={12} />
+                                            Try It
+                                        </button>
+                                    </div>
+                                    <p className="text-gray-400 text-sm mb-3">{endpoint.description}</p>
+                                    <div className="bg-black/40 rounded-lg p-3 font-mono text-xs text-gray-500">
+                                        <span className="text-gray-600">// Example response</span>
+                                        <br />
+                                        {endpoint.response}
+                                    </div>
                                 </div>
-                                <p className="text-gray-400">Returns node telemetry including uptime, proofs generated, and OEV recaptured.</p>
+                            ))}
+                        </div>
+
+                        {/* Live API Response */}
+                        {(loadingApi || apiResponse) && (
+                            <div className="card-glass p-6 mt-8">
+                                <h4 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                                    <Database className="text-purple-400" />
+                                    Live API Response
+                                </h4>
+                                {loadingApi ? (
+                                    <div className="flex items-center gap-2 text-gray-400">
+                                        <div className="w-4 h-4 border-2 border-gray-400/30 border-t-gray-400 rounded-full animate-spin" />
+                                        Fetching...
+                                    </div>
+                                ) : (
+                                    <pre className="bg-black/60 rounded-lg p-4 font-mono text-sm text-green-400 overflow-x-auto max-h-64">
+                                        {apiResponse}
+                                    </pre>
+                                )}
                             </div>
-                            <div>
-                                <div className="flex items-center gap-2 mb-2">
-                                    <span className="px-2 py-1 bg-green-900 text-green-400 rounded">GET</span>
-                                    <span className="text-white">/api/feeds</span>
-                                </div>
-                                <p className="text-gray-400">Returns list of active data feeds with live values, confidence intervals, and ZK status.</p>
-                            </div>
-                            <div>
-                                <div className="flex items-center gap-2 mb-2">
-                                    <span className="px-2 py-1 bg-green-900 text-green-400 rounded">GET</span>
-                                    <span className="text-white">/api/jobs</span>
-                                </div>
-                                <p className="text-gray-400">Returns the last 50 processed oracle requests (Price Feeds, VRF, ZK Compute).</p>
-                            </div>
-                            <div>
-                                <div className="flex items-center gap-2 mb-2">
-                                    <span className="px-2 py-1 bg-green-900 text-green-400 rounded">GET</span>
-                                    <span className="text-white">/api/proposals</span>
-                                </div>
-                                <p className="text-gray-400">Returns the list of community governance proposals for the DAO.</p>
-                            </div>
-                            <div className="pt-6 border-t border-white/5">
-                                <h4 className="text-gray-300 mb-2 uppercase text-xs font-bold tracking-widest text-cyan-400">Authenticated Sources</h4>
-                                <div className="text-xs text-gray-500 leading-relaxed">
-                                    Private endpoints require injection from the node's secure vault. Use the Enterprise Gateway UI to manage institutional credentials.
-                                </div>
-                            </div>
+                        )}
+
+                        <div className="mt-8 p-6 bg-blue-900/10 border border-blue-500/20 rounded-xl">
+                            <h4 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+                                <Shield className="text-blue-400" />
+                                Authenticated Enterprise Endpoints
+                            </h4>
+                            <p className="text-gray-400 text-sm">
+                                Private endpoints require injection from the node's secure vault. Use the Enterprise Gateway UI to manage institutional credentials.
+                            </p>
                         </div>
                     </motion.div>
                 )}
 
                 {activeSection === 'examples' && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="card-glass p-12 min-h-[400px]">
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                         <h3 className="text-3xl font-bold text-white mb-6">Example dApps</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="p-6 border border-white/10 rounded-xl hover:border-[#00FFFF] transition-colors group cursor-pointer">
-                                <h4 className="text-xl font-bold text-white mb-2 group-hover:text-[#00FFFF]">Prediction Market</h4>
-                                <p className="text-gray-400 text-sm mb-4">A decentralized betting platform using Obscura for sports results.</p>
-                                <span className="text-xs font-mono text-gray-500">github.com/obscura/examples/market</span>
-                            </div>
-                            <div className="p-6 border border-white/10 rounded-xl hover:border-[#00FFFF] transition-colors group cursor-pointer">
-                                <h4 className="text-xl font-bold text-white mb-2 group-hover:text-[#00FFFF]">Private Identity</h4>
-                                <p className="text-gray-400 text-sm mb-4">KYC verification where user data never leaves the device.</p>
-                                <span className="text-xs font-mono text-gray-500">github.com/obscura/examples/identity</span>
-                            </div>
+                            {exampleApps.map((app, idx) => (
+                                <motion.div
+                                    key={idx}
+                                    whileHover={{ y: -5 }}
+                                    className="card-glass p-6 hover:border-[#00FFFF]/30 transition-all cursor-pointer group"
+                                >
+                                    <div className="flex justify-between items-start mb-3">
+                                        <h4 className="text-xl font-bold text-white group-hover:text-[#00FFFF]">{app.title}</h4>
+                                        <span className="text-xs px-2 py-1 bg-purple-900/30 text-purple-400 rounded">{app.language}</span>
+                                    </div>
+                                    <p className="text-gray-400 text-sm mb-4">{app.description}</p>
+                                    <div className="flex flex-wrap gap-2 mb-4">
+                                        {app.features.map((f, i) => (
+                                            <span key={i} className="text-xs px-2 py-1 bg-white/5 text-gray-400 rounded">{f}</span>
+                                        ))}
+                                    </div>
+                                    <div className="flex items-center gap-2 text-xs font-mono text-gray-500 group-hover:text-[#00FFFF]">
+                                        <Globe size={12} />
+                                        {app.github}
+                                        <ExternalLink size={12} className="ml-auto" />
+                                    </div>
+                                </motion.div>
+                            ))}
                         </div>
                     </motion.div>
                 )}
 
-                {/* Resources Grid for quick access - Clicking these switches tab */}
+                {/* Resources Grid for quick access */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12 pt-12 border-t border-white/10">
                     <ResourceCard
                         icon={<Code className="text-purple-400" />}
