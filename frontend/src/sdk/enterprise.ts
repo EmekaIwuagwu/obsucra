@@ -1,181 +1,328 @@
-// Obscura Enterprise SDK
-// TypeScript/JavaScript SDK for easy integration with DeFi protocols
+/**
+ * Obscura Enterprise Frontend SDK
+ * Complete integration layer between React frontend and Go backend
+ * 
+ * Features:
+ * - Real-time WebSocket subscriptions
+ * - REST API integration
+ * - React hooks for easy data binding
+ * - TypeScript types for all data models
+ */
 
-export interface ObscuraConfig {
-    rpcUrl: string;
-    oracleAddress: string;
-    privateKey?: string;
-    network?: 'mainnet' | 'sepolia' | 'arbitrum' | 'optimism';
-    timeout?: number;
-}
+// ============================================================================
+// Types
+// ============================================================================
 
-export interface PriceFeed {
+export interface ChainStats {
     id: string;
     name: string;
-    value: string;
-    decimals: number;
-    timestamp: number;
-    roundId: number;
-    confidence: number;
-    isZKVerified: boolean;
+    tps: string;
+    height: string;
+    status: 'Optimal' | 'Congested' | 'Degraded';
+    latency: string;
 }
 
-export interface OracleRequest {
-    requestId: string;
-    requester: string;
-    feedId: string;
-    status: 'pending' | 'fulfilled' | 'failed';
-    value?: string;
+export interface FeedData {
+    name: string;
+    price: string;
+    status: 'Verified' | 'Pending' | 'Obscured';
+    trend: number;
+    roundId?: number;
+    decimals?: number;
+    isZKVerified?: boolean;
     timestamp?: number;
 }
 
-export interface NodeInfo {
-    address: string;
-    name: string;
-    reputation: number;
-    stakedAmount: string;
-    status: 'active' | 'inactive' | 'slashed';
+export interface JobRecord {
+    id: string;
+    type: 'Price Feed' | 'VRF Request' | 'Compute';
+    target: string;
+    status: 'Fulfilled' | 'Pending' | 'Failed';
+    hash: string;
+    roundId?: number;
+    timestamp: string;
 }
 
-export interface ReserveInfo {
-    assetId: string;
-    assetName: string;
-    tokenAddress: string;
-    reportedReserve: string;
-    circulatingSupply: string;
-    collateralRatio: number;
-    status: 'healthy' | 'warning' | 'critical';
-    lastUpdateTime: number;
+export interface NodeMetrics {
+    requests_processed: number;
+    proofs_generated: number;
+    transactions_sent: number;
+    transactions_failed: number;
+    aggregations_completed: number;
+    outliers_detected: number;
+    oev_recaptured: number;
+    uptime_seconds: number;
+    last_request_timestamp: number;
+    total_staked: number;
 }
 
-/**
- * Obscura Enterprise SDK
- * 
- * Easy integration with the Obscura Oracle Network for:
- * - Price feeds with ZK verification
- * - VRF (Verifiable Random Function)
- * - Proof of Reserve
- * - Custom data requests
- * 
- * @example
- * ```typescript
- * import { ObscuraSDK } from '@obscura/sdk';
- * 
- * const sdk = new ObscuraSDK({
- *   rpcUrl: 'https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY',
- *   oracleAddress: '0x...',
- * });
- * 
- * // Get ETH/USD price
- * const price = await sdk.getPrice('ETH-USD');
- * console.log(price.value); // "$3,847.52"
- * 
- * // Request VRF randomness
- * const random = await sdk.requestRandomness('my-seed');
- * console.log(random); // "0x7a9f..."
- * ```
- */
-export class ObscuraSDK {
-    private config: ObscuraConfig;
+export interface NetworkInfo {
+    total_value_secured: number;
+    active_nodes: number;
+    data_points_per_day: number;
+    uptime_percent: number;
+    total_staked: number;
+    oev_recaptured: number;
+    oev_recaptured_eth: number;
+    last_auction_winner: string;
+    auction_frequency_ms: number;
+    security_status: string;
+    oev_potential: string;
+}
+
+export interface Proposal {
+    id: number;
+    title: string;
+    description?: string;
+    proposer?: string;
+    votes_for: number;
+    votes_against: number;
+    status: 'Active' | 'Passed' | 'Rejected' | 'Ending Soon';
+    endTime?: string;
+}
+
+export interface VRFResult {
+    requestId: string;
+    randomValue: string;
+    proof: string;
+    timestamp: string;
+}
+
+export interface ZKProofResult {
+    valid: boolean;
+    proofHash?: string;
+    verificationTime?: number;
+}
+
+export interface PriceHistory {
+    time: string;
+    price: number;
+}
+
+export type SubscriptionCallback<T> = (data: T) => void;
+
+// ============================================================================
+// WebSocket Manager (for real-time push updates)
+// ============================================================================
+
+export class WebSocketManager {
+    private ws: WebSocket | null = null;
+    private endpoint: string;
+    private reconnectAttempts: number = 0;
+    private maxReconnectAttempts: number = 5;
+    private reconnectDelay: number = 1000;
+    private subscriptions: Map<string, Set<SubscriptionCallback<any>>> = new Map();
+    private isConnecting: boolean = false;
+
+    constructor(endpoint: string = 'ws://localhost:8080/ws') {
+        this.endpoint = endpoint;
+    }
+
+    connect(): Promise<void> {
+        return new Promise((resolve, reject) => {
+            if (this.ws?.readyState === WebSocket.OPEN) {
+                resolve();
+                return;
+            }
+
+            if (this.isConnecting) {
+                // Wait for existing connection
+                setTimeout(() => resolve(), 100);
+                return;
+            }
+
+            this.isConnecting = true;
+
+            try {
+                this.ws = new WebSocket(this.endpoint);
+
+                this.ws.onopen = () => {
+                    console.log('[Obscura WS] Connected');
+                    this.reconnectAttempts = 0;
+                    this.isConnecting = false;
+                    resolve();
+                };
+
+                this.ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        this.handleMessage(data);
+                    } catch (err) {
+                        console.error('[Obscura WS] Parse error:', err);
+                    }
+                };
+
+                this.ws.onclose = () => {
+                    console.log('[Obscura WS] Disconnected');
+                    this.isConnecting = false;
+                    this.attemptReconnect();
+                };
+
+                this.ws.onerror = (error) => {
+                    console.error('[Obscura WS] Error:', error);
+                    this.isConnecting = false;
+                    reject(error);
+                };
+            } catch (error) {
+                this.isConnecting = false;
+                reject(error);
+            }
+        });
+    }
+
+    private handleMessage(data: any) {
+        const { type, payload } = data;
+        const callbacks = this.subscriptions.get(type);
+        if (callbacks) {
+            callbacks.forEach(callback => {
+                try {
+                    callback(payload);
+                } catch (err) {
+                    console.error('[Obscura WS] Callback error:', err);
+                }
+            });
+        }
+    }
+
+    private attemptReconnect() {
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            console.error('[Obscura WS] Max reconnect attempts reached');
+            return;
+        }
+
+        this.reconnectAttempts++;
+        const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+
+        console.log(`[Obscura WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+
+        setTimeout(() => {
+            this.connect().catch(() => { });
+        }, delay);
+    }
+
+    subscribe<T>(type: string, callback: SubscriptionCallback<T>): () => void {
+        if (!this.subscriptions.has(type)) {
+            this.subscriptions.set(type, new Set());
+        }
+        this.subscriptions.get(type)!.add(callback);
+
+        // Send subscription message if connected
+        if (this.ws?.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ action: 'subscribe', type }));
+        }
+
+        return () => {
+            this.subscriptions.get(type)?.delete(callback);
+            if (this.subscriptions.get(type)?.size === 0) {
+                this.subscriptions.delete(type);
+                if (this.ws?.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({ action: 'unsubscribe', type }));
+                }
+            }
+        };
+    }
+
+    disconnect() {
+        if (this.ws) {
+            this.ws.close();
+            this.ws = null;
+        }
+    }
+}
+
+// ============================================================================
+// Main SDK Client
+// ============================================================================
+
+export class ObscuraEnterpriseSDK {
     private apiEndpoint: string;
+    private wsManager: WebSocketManager;
+    private pollIntervals: Map<string, ReturnType<typeof setInterval>> = new Map();
 
-    constructor(config: ObscuraConfig) {
-        this.config = {
-            timeout: 30000,
-            network: 'mainnet',
-            ...config,
-        };
-
-        // Set API endpoint based on network
-        this.apiEndpoint = this.getApiEndpoint(this.config.network!);
+    constructor(options: {
+        apiEndpoint?: string;
+        wsEndpoint?: string;
+    } = {}) {
+        this.apiEndpoint = options.apiEndpoint || 'http://localhost:8080';
+        this.wsManager = new WebSocketManager(options.wsEndpoint || 'ws://localhost:8080/ws');
     }
 
-    private getApiEndpoint(network: string): string {
-        const endpoints: Record<string, string> = {
-            mainnet: 'https://api.obscura.network',
-            sepolia: 'https://sepolia-api.obscura.network',
-            arbitrum: 'https://arbitrum-api.obscura.network',
-            optimism: 'https://optimism-api.obscura.network',
-        };
-        return endpoints[network] || 'http://localhost:8080';
-    }
-
-    // ============ PRICE FEEDS ============
+    // ============================================================================
+    // Core API Methods
+    // ============================================================================
 
     /**
-     * Get current price for a feed
-     * @param feedId Feed identifier (e.g., "ETH-USD", "BTC-USD")
+     * Fetch network-wide statistics
      */
-    async getPrice(feedId: string): Promise<PriceFeed> {
-        const response = await this.fetch(`/api/feeds/${feedId}`);
+    async getNetworkStats(): Promise<NodeMetrics> {
+        const response = await this.fetch('/api/stats');
         return response;
     }
 
     /**
-     * Get multiple prices at once
-     * @param feedIds Array of feed identifiers
+     * Fetch all price feeds
      */
-    async getPrices(feedIds: string[]): Promise<PriceFeed[]> {
-        const response = await this.fetch(`/api/feeds?ids=${feedIds.join(',')}`);
-        return response;
-    }
-
-    /**
-     * Get all available price feeds
-     */
-    async listFeeds(): Promise<PriceFeed[]> {
+    async getFeeds(): Promise<FeedData[]> {
         const response = await this.fetch('/api/feeds');
+        return Array.isArray(response) ? response : [];
+    }
+
+    /**
+     * Fetch specific feed by ID
+     */
+    async getFeed(feedId: string): Promise<FeedData | null> {
+        const feeds = await this.getFeeds();
+        return feeds.find(f => f.name === feedId || f.name.replace(' / ', '-') === feedId) || null;
+    }
+
+    /**
+     * Fetch recent job history
+     */
+    async getRecentJobs(): Promise<JobRecord[]> {
+        const response = await this.fetch('/api/jobs');
+        return Array.isArray(response) ? response : [];
+    }
+
+    /**
+     * Fetch governance proposals
+     */
+    async getProposals(): Promise<Proposal[]> {
+        const response = await this.fetch('/api/proposals');
+        return Array.isArray(response) ? response : [];
+    }
+
+    /**
+     * Fetch network info (TVS, active nodes, etc.)
+     */
+    async getNetworkInfo(): Promise<NetworkInfo> {
+        const response = await this.fetch('/api/network');
         return response;
     }
 
     /**
-     * Get historical price data
-     * @param feedId Feed identifier
-     * @param from Start timestamp
-     * @param to End timestamp
+     * Fetch blockchain chain stats
      */
-    async getHistoricalPrices(
-        feedId: string,
-        from: number,
-        to: number
-    ): Promise<PriceFeed[]> {
-        const response = await this.fetch(
-            `/api/feeds/${feedId}/history?from=${from}&to=${to}`
-        );
-        return response;
+    async getChainStats(): Promise<ChainStats[]> {
+        const response = await this.fetch('/api/chains');
+        return Array.isArray(response) ? response : [];
     }
 
     /**
-     * Subscribe to price updates (WebSocket)
-     * @param feedId Feed identifier
-     * @param callback Function called on each update
+     * Check node health
      */
-    subscribeToPrice(
-        feedId: string,
-        callback: (price: PriceFeed) => void
-    ): () => void {
-        const ws = new WebSocket(`${this.apiEndpoint.replace('http', 'ws')}/ws/feeds/${feedId}`);
-
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            callback(data);
-        };
-
-        // Return unsubscribe function
-        return () => ws.close();
+    async checkHealth(): Promise<{ status: string; timestamp: number }> {
+        const response = await this.fetch('/health');
+        return response;
     }
 
-    // ============ VRF (RANDOMNESS) ============
+    // ============================================================================
+    // VRF (Randomness)
+    // ============================================================================
 
     /**
      * Request verifiable randomness
-     * @param seed Seed for randomness generation
      */
-    async requestRandomness(seed: string): Promise<{
-        requestId: string;
-        randomValue: string;
-        proof: string;
-    }> {
+    async requestRandomness(seed: string): Promise<VRFResult> {
         const response = await this.fetch('/api/vrf/request', {
             method: 'POST',
             body: JSON.stringify({ seed }),
@@ -185,15 +332,8 @@ export class ObscuraSDK {
 
     /**
      * Verify a VRF proof
-     * @param proof The proof to verify
-     * @param publicKey The public key used
-     * @param seed The original seed
      */
-    async verifyRandomness(
-        proof: string,
-        publicKey: string,
-        seed: string
-    ): Promise<boolean> {
+    async verifyRandomness(proof: string, publicKey: string, seed: string): Promise<boolean> {
         const response = await this.fetch('/api/vrf/verify', {
             method: 'POST',
             body: JSON.stringify({ proof, publicKey, seed }),
@@ -201,174 +341,28 @@ export class ObscuraSDK {
         return response.valid;
     }
 
-    // ============ PROOF OF RESERVE ============
-
-    /**
-     * Get reserve info for an asset
-     * @param assetId Asset identifier
-     */
-    async getReserve(assetId: string): Promise<ReserveInfo> {
-        const response = await this.fetch(`/api/reserves/${assetId}`);
-        return response;
-    }
-
-    /**
-     * Check if a reserve is healthy (100%+ collateralized)
-     * @param assetId Asset identifier
-     */
-    async isReserveHealthy(assetId: string): Promise<boolean> {
-        const reserve = await this.getReserve(assetId);
-        return reserve.status === 'healthy';
-    }
-
-    /**
-     * Get all monitored reserves
-     */
-    async listReserves(): Promise<ReserveInfo[]> {
-        const response = await this.fetch('/api/reserves');
-        return response;
-    }
-
-    // ============ CUSTOM DATA REQUESTS ============
-
-    /**
-     * Make a custom data request
-     * @param url API URL to fetch data from
-     * @param path JSON path to extract value
-     */
-    async requestData(url: string, path: string): Promise<OracleRequest> {
-        const response = await this.fetch('/api/data/request', {
-            method: 'POST',
-            body: JSON.stringify({ url, path }),
-        });
-        return response;
-    }
-
-    /**
-     * Get status of a data request
-     * @param requestId The request ID
-     */
-    async getRequestStatus(requestId: string): Promise<OracleRequest> {
-        const response = await this.fetch(`/api/data/request/${requestId}`);
-        return response;
-    }
-
-    // ============ NETWORK INFO ============
-
-    /**
-     * Get network statistics
-     */
-    async getNetworkStats(): Promise<{
-        totalValueSecured: string;
-        activeNodes: number;
-        dataPointsPerDay: number;
-        uptimePercent: number;
-    }> {
-        const response = await this.fetch('/api/network');
-        return response;
-    }
-
-    /**
-     * Get list of active nodes
-     */
-    async getNodes(): Promise<NodeInfo[]> {
-        const response = await this.fetch('/api/nodes');
-        return response;
-    }
-
-    /**
-     * Get chain statistics
-     */
-    async getChainStats(): Promise<{
-        id: string;
-        name: string;
-        tps: string;
-        height: string;
-        status: string;
-    }[]> {
-        const response = await this.fetch('/api/chains');
-        return response;
-    }
-
-    // ============ GOVERNANCE ============
-
-    /**
-     * Get active governance proposals
-     */
-    async getProposals(): Promise<{
-        id: number;
-        title: string;
-        proposer: string;
-        forVotes: string;
-        againstVotes: string;
-        status: string;
-    }[]> {
-        const response = await this.fetch('/api/governance/proposals');
-        return response;
-    }
-
-    /**
-     * Get voting power for an address
-     * @param address Wallet address
-     */
-    async getVotingPower(address: string): Promise<string> {
-        const response = await this.fetch(`/api/governance/voting-power/${address}`);
-        return response.votingPower;
-    }
-
-    // ============ STAKING ============
-
-    /**
-     * Get staking info for an address
-     * @param address Wallet address
-     */
-    async getStakeInfo(address: string): Promise<{
-        stakedAmount: string;
-        pendingRewards: string;
-        lockEndTime: number;
-        stakingAPY: number;
-    }> {
-        const response = await this.fetch(`/api/staking/${address}`);
-        return response;
-    }
-
-    /**
-     * Get current staking APY
-     */
-    async getStakingAPY(): Promise<number> {
-        const response = await this.fetch('/api/staking/apy');
-        return response.apy;
-    }
-
-    // ============ ZK PROOFS ============
+    // ============================================================================
+    // ZK Proofs
+    // ============================================================================
 
     /**
      * Verify a ZK proof
-     * @param proof The serialized proof
-     * @param publicInputs Public inputs to the circuit
      */
-    async verifyZKProof(
-        proof: string,
-        publicInputs: string[]
-    ): Promise<boolean> {
+    async verifyZKProof(proof: string, publicInputs: string[]): Promise<ZKProofResult> {
         const response = await this.fetch('/api/zk/verify', {
             method: 'POST',
             body: JSON.stringify({ proof, publicInputs }),
         });
-        return response.valid;
+        return response;
     }
 
     /**
-     * Generate a range proof (value is within bounds)
-     * @param value The secret value
-     * @param min Minimum bound
-     * @param max Maximum bound
+     * Generate a range proof
      */
-    async generateRangeProof(
-        value: number,
-        min: number,
-        max: number
-    ): Promise<{ proof: string; publicInputs: string[] }> {
+    async generateRangeProof(value: number, min: number, max: number): Promise<{
+        proof: string;
+        publicInputs: string[];
+    }> {
         const response = await this.fetch('/api/zk/range-proof', {
             method: 'POST',
             body: JSON.stringify({ value, min, max }),
@@ -376,79 +370,352 @@ export class ObscuraSDK {
         return response;
     }
 
-    // ============ INTERNAL ============
+    // ============================================================================
+    // Real-time Polling (alternative to WebSocket)
+    // ============================================================================
+
+    /**
+     * Start polling for data updates
+     */
+    startPolling<T>(
+        key: string,
+        fetcher: () => Promise<T>,
+        callback: (data: T) => void,
+        intervalMs: number = 5000
+    ): () => void {
+        // Initial fetch
+        fetcher().then(callback).catch(console.error);
+
+        // Set up interval
+        const intervalId = setInterval(() => {
+            fetcher().then(callback).catch(console.error);
+        }, intervalMs);
+
+        this.pollIntervals.set(key, intervalId);
+
+        // Return cleanup function
+        return () => {
+            const id = this.pollIntervals.get(key);
+            if (id) {
+                clearInterval(id);
+                this.pollIntervals.delete(key);
+            }
+        };
+    }
+
+    /**
+     * Stop all polling
+     */
+    stopAllPolling() {
+        this.pollIntervals.forEach((intervalId) => {
+            clearInterval(intervalId);
+        });
+        this.pollIntervals.clear();
+    }
+
+    // ============================================================================
+    // WebSocket Methods
+    // ============================================================================
+
+    /**
+     * Connect to WebSocket server
+     */
+    async connectWebSocket(): Promise<void> {
+        return this.wsManager.connect();
+    }
+
+    /**
+     * Subscribe to real-time price updates
+     */
+    subscribeToPrices(callback: SubscriptionCallback<FeedData[]>): () => void {
+        return this.wsManager.subscribe('prices', callback);
+    }
+
+    /**
+     * Subscribe to job updates
+     */
+    subscribeToJobs(callback: SubscriptionCallback<JobRecord>): () => void {
+        return this.wsManager.subscribe('job', callback);
+    }
+
+    /**
+     * Subscribe to network metrics
+     */
+    subscribeToMetrics(callback: SubscriptionCallback<NodeMetrics>): () => void {
+        return this.wsManager.subscribe('metrics', callback);
+    }
+
+    /**
+     * Disconnect WebSocket
+     */
+    disconnectWebSocket() {
+        this.wsManager.disconnect();
+    }
+
+    // ============================================================================
+    // Internal
+    // ============================================================================
 
     private async fetch(path: string, options: RequestInit = {}): Promise<any> {
         const url = `${this.apiEndpoint}${path}`;
 
-        const response = await fetch(url, {
-            ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers,
-            },
-        });
+        try {
+            const response = await fetch(url, {
+                ...options,
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...options.headers,
+                },
+            });
 
-        if (!response.ok) {
-            const error = await response.text();
-            throw new Error(`Obscura API Error: ${response.status} - ${error}`);
+            if (!response.ok) {
+                throw new Error(`API Error: ${response.status} ${response.statusText}`);
+            }
+
+            return response.json();
+        } catch (error) {
+            console.error(`[Obscura SDK] Fetch error for ${path}:`, error);
+            throw error;
         }
-
-        return response.json();
     }
 }
 
-// ============ SOLIDITY INTERFACE ============
+// ============================================================================
+// React Hooks
+// ============================================================================
+
+import { useState, useEffect, useCallback } from 'react';
+
+// Singleton SDK instance
+let sdkInstance: ObscuraEnterpriseSDK | null = null;
+
+export function initializeSDK(options?: { apiEndpoint?: string; wsEndpoint?: string }) {
+    sdkInstance = new ObscuraEnterpriseSDK(options);
+    return sdkInstance;
+}
+
+export function getSDK(): ObscuraEnterpriseSDK {
+    if (!sdkInstance) {
+        sdkInstance = new ObscuraEnterpriseSDK();
+    }
+    return sdkInstance;
+}
 
 /**
- * Solidity interface for integrating Obscura in smart contracts
- * 
- * @example
- * ```solidity
- * import "@obscura/sdk/contracts/IObscuraOracle.sol";
- * 
- * contract MyDeFiProtocol {
- *     IObscuraOracle public oracle;
- *     
- *     function getETHPrice() external view returns (int256) {
- *         return oracle.latestAnswer("ETH-USD");
- *     }
- * }
- * ```
+ * Hook for fetching network metrics
  */
-export const SOLIDITY_INTERFACE = `
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+export function useNetworkStats(pollInterval: number = 5000) {
+    const [data, setData] = useState<NodeMetrics | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<Error | null>(null);
+    const sdk = getSDK();
 
-interface IObscuraOracle {
-    // Chainlink-compatible functions
-    function latestRoundData() external view returns (
-        uint80 roundId,
-        int256 answer,
-        uint256 startedAt,
-        uint256 updatedAt,
-        uint80 answeredInRound
-    );
-    
-    function latestAnswer() external view returns (int256);
-    function latestTimestamp() external view returns (uint256);
-    function decimals() external view returns (uint8);
-    function description() external view returns (string memory);
-    
-    // Obscura-specific functions
-    function getZKVerifiedPrice(bytes32 feedId) external view returns (
-        int256 price,
-        uint256 timestamp,
-        bytes memory proof
-    );
-    
-    function requestRandomness(bytes32 seed) external returns (bytes32 requestId);
-    function fulfillRandomness(bytes32 requestId) external view returns (uint256 randomValue);
-    
-    function getReserveRatio(bytes32 assetId) external view returns (uint256 ratio);
-    function isReserveHealthy(bytes32 assetId) external view returns (bool);
+    useEffect(() => {
+        const cleanup = sdk.startPolling(
+            'networkStats',
+            () => sdk.getNetworkStats(),
+            (result) => {
+                setData(result);
+                setLoading(false);
+                setError(null);
+            },
+            pollInterval
+        );
+
+        return cleanup;
+    }, [pollInterval]);
+
+    return { data, loading, error };
 }
-`;
 
-// Export default instance for quick usage
-export default ObscuraSDK;
+/**
+ * Hook for fetching price feeds
+ */
+export function useFeeds(pollInterval: number = 5000) {
+    const [data, setData] = useState<FeedData[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<Error | null>(null);
+    const sdk = getSDK();
+
+    useEffect(() => {
+        const cleanup = sdk.startPolling(
+            'feeds',
+            () => sdk.getFeeds(),
+            (result) => {
+                setData(result);
+                setLoading(false);
+                setError(null);
+            },
+            pollInterval
+        );
+
+        return cleanup;
+    }, [pollInterval]);
+
+    return { data, loading, error };
+}
+
+/**
+ * Hook for fetching job history
+ */
+export function useRecentJobs(pollInterval: number = 5000) {
+    const [data, setData] = useState<JobRecord[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<Error | null>(null);
+    const sdk = getSDK();
+
+    useEffect(() => {
+        const cleanup = sdk.startPolling(
+            'jobs',
+            () => sdk.getRecentJobs(),
+            (result) => {
+                setData(result);
+                setLoading(false);
+                setError(null);
+            },
+            pollInterval
+        );
+
+        return cleanup;
+    }, [pollInterval]);
+
+    return { data, loading, error };
+}
+
+/**
+ * Hook for fetching chain statistics
+ */
+export function useChainStats(pollInterval: number = 5000) {
+    const [data, setData] = useState<ChainStats[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<Error | null>(null);
+    const sdk = getSDK();
+
+    useEffect(() => {
+        const cleanup = sdk.startPolling(
+            'chains',
+            () => sdk.getChainStats(),
+            (result) => {
+                setData(result);
+                setLoading(false);
+                setError(null);
+            },
+            pollInterval
+        );
+
+        return cleanup;
+    }, [pollInterval]);
+
+    return { data, loading, error };
+}
+
+/**
+ * Hook for fetching network info
+ */
+export function useNetworkInfo(pollInterval: number = 5000) {
+    const [data, setData] = useState<NetworkInfo | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<Error | null>(null);
+    const sdk = getSDK();
+
+    useEffect(() => {
+        const cleanup = sdk.startPolling(
+            'networkInfo',
+            () => sdk.getNetworkInfo(),
+            (result) => {
+                setData(result);
+                setLoading(false);
+                setError(null);
+            },
+            pollInterval
+        );
+
+        return cleanup;
+    }, [pollInterval]);
+
+    return { data, loading, error };
+}
+
+/**
+ * Hook for fetching governance proposals
+ */
+export function useProposals(pollInterval: number = 30000) {
+    const [data, setData] = useState<Proposal[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<Error | null>(null);
+    const sdk = getSDK();
+
+    useEffect(() => {
+        const cleanup = sdk.startPolling(
+            'proposals',
+            () => sdk.getProposals(),
+            (result) => {
+                setData(result);
+                setLoading(false);
+                setError(null);
+            },
+            pollInterval
+        );
+
+        return cleanup;
+    }, [pollInterval]);
+
+    return { data, loading, error };
+}
+
+/**
+ * Hook for VRF randomness
+ */
+export function useVRF() {
+    const [loading, setLoading] = useState(false);
+    const [result, setResult] = useState<VRFResult | null>(null);
+    const [error, setError] = useState<Error | null>(null);
+    const sdk = getSDK();
+
+    const requestRandomness = useCallback(async (seed: string) => {
+        setLoading(true);
+        setError(null);
+        try {
+            const vrfResult = await sdk.requestRandomness(seed);
+            setResult(vrfResult);
+            return vrfResult;
+        } catch (err) {
+            setError(err as Error);
+            throw err;
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    return { requestRandomness, result, loading, error };
+}
+
+/**
+ * Hook for checking node health
+ */
+export function useHealth(pollInterval: number = 10000) {
+    const [isHealthy, setIsHealthy] = useState(true);
+    const [lastCheck, setLastCheck] = useState<number>(Date.now());
+    const sdk = getSDK();
+
+    useEffect(() => {
+        const check = async () => {
+            try {
+                await sdk.checkHealth();
+                setIsHealthy(true);
+            } catch {
+                setIsHealthy(false);
+            }
+            setLastCheck(Date.now());
+        };
+
+        check();
+        const id = setInterval(check, pollInterval);
+        return () => clearInterval(id);
+    }, [pollInterval]);
+
+    return { isHealthy, lastCheck };
+}
+
+// Export default SDK instance for direct usage
+export default ObscuraEnterpriseSDK;

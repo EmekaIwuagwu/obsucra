@@ -1,67 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { motion } from 'framer-motion';
 import { Activity, Radio, Cpu, Lock, ChevronRight, BarChart3, Coins, Zap } from 'lucide-react';
-import { ObscuraSDK } from '../sdk/obscura';
+import {
+    useChainStats,
+    useRecentJobs,
+    useNetworkStats,
+    useNetworkInfo,
+    type ChainStats as ChainStatsType,
+    type JobRecord,
+} from '../sdk/enterprise';
 
 const NetworkDashboard: React.FC = () => {
-    // Chain stats fetched from backend
-    const [chainStats, setChainStats] = useState<any[]>([]);
-    const [recentJobs, setRecentJobs] = useState<any[]>([]);
-    const [nodeMetrics, setNodeMetrics] = useState<any>(null);
-    const [networkInfo, setNetworkInfo] = useState<any>(null);
-    const sdk = new ObscuraSDK();
+    // Use React hooks for real-time data
+    const { data: chainStats, loading: chainsLoading } = useChainStats(5000);
+    const { data: recentJobs, loading: jobsLoading } = useRecentJobs(5000);
+    const { data: nodeMetrics, loading: metricsLoading } = useNetworkStats(5000);
+    const { data: networkInfo, loading: networkLoading } = useNetworkInfo(5000);
 
-    // Fetch real data from backend
-    useEffect(() => {
-        const fetchMetrics = async () => {
-            try {
-                const stats = await sdk.getNetworkStats();
-                setNodeMetrics(stats);
-            } catch (err) {
-                console.error("Failed to fetch node metrics:", err);
-            }
-        };
-
-        const fetchRecentJobs = async () => {
-            try {
-                const jobs = await sdk.getRecentJobs();
-                setRecentJobs(jobs);
-            } catch (err) {
-                console.error("Failed to fetch jobs:", err);
-            }
-        };
-
-        const fetchChainStats = async () => {
-            try {
-                const chains = await sdk.getChainStats();
-                setChainStats(chains);
-            } catch (err) {
-                console.error("Failed to fetch chain stats:", err);
-            }
-        };
-
-        const fetchNetworkInfo = async () => {
-            try {
-                const info = await sdk.getNetworkInfo();
-                setNetworkInfo(info);
-            } catch (err) {
-                console.error("Failed to fetch network info:", err);
-            }
-        };
-
-        fetchMetrics();
-        fetchRecentJobs();
-        fetchChainStats();
-        fetchNetworkInfo();
-
-        const interval = setInterval(() => {
-            fetchMetrics();
-            fetchRecentJobs();
-            fetchChainStats();
-            fetchNetworkInfo();
-        }, 5000);
-        return () => clearInterval(interval);
-    }, []);
+    const isLoading = chainsLoading || jobsLoading || metricsLoading || networkLoading;
 
     return (
         <div className="p-8 pt-12 min-h-screen">
@@ -72,41 +28,57 @@ const NetworkDashboard: React.FC = () => {
                 </div>
                 <div className="flex gap-2">
                     <span className="flex items-center gap-2 text-xs font-mono text-[#00FFFF] bg-[#00FFFF]/10 px-3 py-1 rounded-full border border-[#00FFFF]/30">
-                        <div className="w-2 h-2 bg-[#00FFFF] rounded-full animate-pulse" />
-                        SYSTEM ONLINE
+                        <div className={`w-2 h-2 rounded-full ${isLoading ? 'bg-yellow-400 animate-pulse' : 'bg-[#00FFFF] animate-pulse'}`} />
+                        {isLoading ? 'SYNCING...' : 'SYSTEM ONLINE'}
                     </span>
                 </div>
             </div>
 
             {/* Blockchains Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-                {chainStats.map((chain) => (
-                    <motion.div
-                        key={chain.id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="card-glass relative overflow-hidden"
-                    >
-                        <div className="absolute top-0 right-0 p-4 opacity-10">
-                            <Activity size={48} />
-                        </div>
-                        <h3 className="text-lg font-bold text-gray-200 mb-4 flex items-center gap-2">
-                            {chain.name}
-                            {chain.status === 'Congested' && <span className="w-2 h-2 bg-yellow-500 rounded-full" />}
-                        </h3>
+                {chainStats.length > 0 ? (
+                    chainStats.map((chain: ChainStatsType) => (
+                        <motion.div
+                            key={chain.id}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="card-glass relative overflow-hidden"
+                        >
+                            <div className="absolute top-0 right-0 p-4 opacity-10">
+                                <Activity size={48} />
+                            </div>
+                            <h3 className="text-lg font-bold text-gray-200 mb-4 flex items-center gap-2">
+                                {chain.name}
+                                {chain.status === 'Congested' && <span className="w-2 h-2 bg-yellow-500 rounded-full" />}
+                                {chain.status === 'Optimal' && <span className="w-2 h-2 bg-green-500 rounded-full" />}
+                            </h3>
 
-                        <div className="space-y-4">
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-widest mb-1">TPS</div>
-                                <div className="text-2xl font-mono text-[#00FFFF]">{chain.tps}</div>
+                            <div className="space-y-4">
+                                <div>
+                                    <div className="text-xs text-gray-400 uppercase tracking-widest mb-1">TPS</div>
+                                    <div className="text-2xl font-mono text-[#00FFFF]">{chain.tps}</div>
+                                </div>
+                                <div>
+                                    <div className="text-xs text-gray-400 uppercase tracking-widest mb-1">Block Height</div>
+                                    <div className="text-sm font-mono text-white">{chain.height}</div>
+                                </div>
+                                <div>
+                                    <div className="text-xs text-gray-400 uppercase tracking-widest mb-1">Latency</div>
+                                    <div className="text-sm font-mono text-green-400">{chain.latency}</div>
+                                </div>
                             </div>
-                            <div>
-                                <div className="text-xs text-gray-400 uppercase tracking-widest mb-1">Block Height</div>
-                                <div className="text-sm font-mono text-white">{chain.height}</div>
-                            </div>
+                        </motion.div>
+                    ))
+                ) : (
+                    // Loading skeleton
+                    [...Array(4)].map((_, idx) => (
+                        <div key={idx} className="card-glass animate-pulse">
+                            <div className="h-6 bg-white/10 rounded mb-4 w-24"></div>
+                            <div className="h-8 bg-white/10 rounded mb-2 w-16"></div>
+                            <div className="h-4 bg-white/10 rounded w-32"></div>
                         </div>
-                    </motion.div>
-                ))}
+                    ))
+                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -115,32 +87,50 @@ const NetworkDashboard: React.FC = () => {
                     <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
                         <Radio size={20} className="text-[#FF00FF]" />
                         Recent Oracle Requests
+                        <span className="ml-auto text-xs text-gray-400 font-mono">
+                            {recentJobs.length} jobs
+                        </span>
                     </h3>
 
                     <div className="space-y-4">
-                        {recentJobs.map((job) => (
-                            <div key={job.id} className="flex justify-between items-center bg-white/5 p-4 rounded-lg hover:bg-white/10 transition-colors cursor-pointer group">
-                                <div className="flex items-center gap-4">
-                                    <div className={`p-2 rounded-lg ${job.type === 'Price Feed' ? 'bg-blue-500/20 text-blue-400' : job.type === 'VRF Request' ? 'bg-purple-500/20 text-purple-400' : 'bg-green-500/20 text-green-400'}`}>
-                                        {job.type === 'Price Feed' ? <Activity size={16} /> : job.type === 'VRF Request' ? <Cpu size={16} /> : <Lock size={16} />}
-                                    </div>
-                                    <div>
-                                        <div className="text-white font-medium">{job.type}</div>
-                                        <div className="text-xs text-gray-400">{job.target}</div>
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center gap-8">
-                                    <div className="text-right hidden sm:block">
-                                        <div className={`text-xs font-bold ${job.status === 'Fulfilled' ? 'text-green-400' : 'text-yellow-400'}`}>
-                                            {job.status} {job.roundId && <span className="text-gray-500 ml-1">#R{job.roundId}</span>}
+                        {recentJobs.length > 0 ? (
+                            recentJobs.slice(0, 6).map((job: JobRecord) => (
+                                <div key={job.id} className="flex justify-between items-center bg-white/5 p-4 rounded-lg hover:bg-white/10 transition-colors cursor-pointer group">
+                                    <div className="flex items-center gap-4">
+                                        <div className={`p-2 rounded-lg ${job.type === 'Price Feed' ? 'bg-blue-500/20 text-blue-400' :
+                                                job.type === 'VRF Request' ? 'bg-purple-500/20 text-purple-400' :
+                                                    'bg-green-500/20 text-green-400'
+                                            }`}>
+                                            {job.type === 'Price Feed' ? <Activity size={16} /> :
+                                                job.type === 'VRF Request' ? <Cpu size={16} /> :
+                                                    <Lock size={16} />}
                                         </div>
-                                        <div className="text-xs font-mono text-gray-500">{job.hash}</div>
+                                        <div>
+                                            <div className="text-white font-medium">{job.type}</div>
+                                            <div className="text-xs text-gray-400">{job.target}</div>
+                                        </div>
                                     </div>
-                                    <ChevronRight size={16} className="text-gray-600 group-hover:text-white transition-colors" />
+
+                                    <div className="flex items-center gap-8">
+                                        <div className="text-right hidden sm:block">
+                                            <div className={`text-xs font-bold ${job.status === 'Fulfilled' ? 'text-green-400' :
+                                                    job.status === 'Pending' ? 'text-yellow-400' :
+                                                        'text-red-400'
+                                                }`}>
+                                                {job.status} {job.roundId && <span className="text-gray-500 ml-1">#R{job.roundId}</span>}
+                                            </div>
+                                            <div className="text-xs font-mono text-gray-500">{job.hash}</div>
+                                        </div>
+                                        <ChevronRight size={16} className="text-gray-600 group-hover:text-white transition-colors" />
+                                    </div>
                                 </div>
+                            ))
+                        ) : (
+                            <div className="text-center py-8 text-gray-500">
+                                <Radio className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                                <p>Waiting for oracle requests...</p>
                             </div>
-                        ))}
+                        )}
                     </div>
 
                     <button className="w-full mt-6 py-3 border border-white/10 rounded-lg text-sm text-gray-400 hover:bg-white/5 hover:text-white transition-colors">
@@ -160,29 +150,31 @@ const NetworkDashboard: React.FC = () => {
                             <div className="flex justify-between items-end border-b border-white/5 pb-4">
                                 <div>
                                     <div className="text-[10px] text-gray-400 uppercase tracking-widest mb-1">Requests Processed</div>
-                                    <div className="text-3xl font-mono text-white">{nodeMetrics?.requests_processed || '0'}</div>
+                                    <div className="text-3xl font-mono text-white">{nodeMetrics?.requests_processed?.toLocaleString() || '0'}</div>
                                 </div>
                                 <div className="text-right">
                                     <div className="text-[10px] text-gray-400 uppercase tracking-widest mb-1">Proofs Generated</div>
-                                    <div className="text-xl font-mono text-[#00FFFF]">{nodeMetrics?.proofs_generated || '0'}</div>
+                                    <div className="text-xl font-mono text-[#00FFFF]">{nodeMetrics?.proofs_generated?.toLocaleString() || '0'}</div>
                                 </div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="bg-white/5 p-3 rounded-xl border border-white/5">
                                     <div className="text-[10px] text-gray-400 uppercase tracking-widest mb-1">TX Sent</div>
-                                    <div className="text-xl font-mono text-green-400 font-bold">{nodeMetrics?.transactions_sent || '0'}</div>
+                                    <div className="text-xl font-mono text-green-400 font-bold">{nodeMetrics?.transactions_sent?.toLocaleString() || '0'}</div>
                                 </div>
                                 <div className="bg-white/5 p-3 rounded-xl border border-white/5">
                                     <div className="text-[10px] text-gray-400 uppercase tracking-widest mb-1">Aggregations</div>
-                                    <div className="text-xl font-mono text-purple-400 font-bold">{nodeMetrics?.aggregations_completed || '0'}</div>
+                                    <div className="text-xl font-mono text-purple-400 font-bold">{nodeMetrics?.aggregations_completed?.toLocaleString() || '0'}</div>
                                 </div>
                             </div>
 
                             <div className="space-y-3">
                                 <div className="flex justify-between text-xs">
                                     <span className="text-gray-400">Node Uptime</span>
-                                    <span className="text-white font-mono">{nodeMetrics ? Math.floor(nodeMetrics.uptime_seconds / 60) : 0}m {nodeMetrics ? Math.floor(nodeMetrics.uptime_seconds % 60) : 0}s</span>
+                                    <span className="text-white font-mono">
+                                        {nodeMetrics ? `${Math.floor((nodeMetrics.uptime_seconds || 0) / 60)}m ${Math.floor((nodeMetrics.uptime_seconds || 0) % 60)}s` : '0m 0s'}
+                                    </span>
                                 </div>
                                 <div className="flex justify-between text-xs">
                                     <span className="text-gray-400">Security Guard</span>
@@ -191,6 +183,10 @@ const NetworkDashboard: React.FC = () => {
                                 <div className="flex justify-between text-xs">
                                     <span className="text-gray-400">OEV Potential</span>
                                     <span className="text-cyan-400 font-bold tracking-widest">{networkInfo?.oev_potential || 'HIGH'}</span>
+                                </div>
+                                <div className="flex justify-between text-xs">
+                                    <span className="text-gray-400">Outliers Detected</span>
+                                    <span className="text-orange-400 font-bold">{nodeMetrics?.outliers_detected || 0}</span>
                                 </div>
                             </div>
                         </div>
@@ -214,7 +210,7 @@ const NetworkDashboard: React.FC = () => {
                             </div>
                             <div>
                                 <div className="text-4xl font-mono text-white font-bold">
-                                    {(networkInfo?.oev_recaptured_eth || (nodeMetrics?.oev_recaptured || 0) * 0.0001).toFixed(4)} <span className="text-sm text-gray-500">ETH</span>
+                                    {(networkInfo?.oev_recaptured_eth || 0).toFixed(4)} <span className="text-sm text-gray-500">ETH</span>
                                 </div>
                                 <div className="text-xs text-cyan-400 font-bold tracking-widest uppercase">Protocol Revenue Shared</div>
                             </div>
@@ -227,7 +223,13 @@ const NetworkDashboard: React.FC = () => {
                             </div>
                             <div className="flex justify-between text-xs">
                                 <span className="text-gray-400">Auction Frequency</span>
-                                <span className="text-white font-mono text-[10px]">{networkInfo?.auction_frequency_ms ? `${(networkInfo.auction_frequency_ms / 60000).toFixed(1)}m avg` : '1.2m avg'}</span>
+                                <span className="text-white font-mono text-[10px]">
+                                    {networkInfo?.auction_frequency_ms ? `${(networkInfo.auction_frequency_ms / 60000).toFixed(1)}m avg` : '1.2m avg'}
+                                </span>
+                            </div>
+                            <div className="flex justify-between text-xs mt-2">
+                                <span className="text-gray-400">Active Nodes</span>
+                                <span className="text-green-400 font-bold">{networkInfo?.active_nodes || 12}</span>
                             </div>
                         </div>
                     </div>
