@@ -2,13 +2,9 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
-const mockData = [
-    { time: '10:00', price: 65200 },
-    { time: '10:05', price: 65350 },
-    { time: '10:10', price: 65120 },
-    { time: '10:15', price: 65500 },
-    { time: '10:20', price: 65800 },
-    { time: '10:25', price: 65400 },
+// Initial chart data - replaced by real data once backend responds
+const initialChartData = [
+    { time: 'Loading', price: 0 }
 ];
 
 interface Feed {
@@ -24,8 +20,9 @@ interface DataFeedsProps {
 }
 
 const DataFeeds: React.FC<DataFeedsProps> = ({ feeds, history }) => {
-    // Fallback to mockData only if history is empty to maintain UI during initial load
-    const chartData = history.length > 0 ? history : mockData;
+    // Use provided history data, with loading state if empty
+    const chartData = history.length > 0 ? history : initialChartData;
+    const isLoading = history.length === 0;
     return (
         <section id="feeds" className="section-padding">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-16">
@@ -54,9 +51,9 @@ const DataFeeds: React.FC<DataFeedsProps> = ({ feeds, history }) => {
                 <div className="glass rounded-3xl p-8 border border-white/10 h-[400px]">
                     <div className="flex justify-between mb-6">
                         <span className="font-bold flex items-center gap-2">
-                            BTC / USD <span className="text-emerald-400 text-xs">+1.2%</span>
+                            BTC / USD {isLoading ? <span className="text-yellow-400 text-xs animate-pulse">Loading...</span> : <span className="text-emerald-400 text-xs">+1.2%</span>}
                         </span>
-                        <span className="text-gray-500 text-xs">Node Consensus: 99.8%</span>
+                        <span className="text-gray-500 text-xs">{isLoading ? 'Connecting...' : 'Node Consensus: 99.8%'}</span>
                     </div>
                     <ResponsiveContainer width="100%" height="80%">
                         <LineChart data={chartData}>

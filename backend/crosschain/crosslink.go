@@ -1,6 +1,7 @@
 package crosschain
 
 import (
+	"crypto/rand"
 	"fmt"
 	"math/big"
 
@@ -20,14 +21,30 @@ type BridgeMessage struct {
 // CrossLink handles cross-chain communication
 type CrossLink struct {
 	supportedChains []string
-	secretKey       *big.Int // Simplified for demo, in prod: from key manager
+	secretKey       *big.Int // Bridge signing key for ZK proofs
 }
 
-// NewCrossLink initializes the bridge module
+// NewCrossLink initializes the bridge module with a secure random key
 func NewCrossLink() *CrossLink {
+	// Generate a cryptographically secure random key for ZK proof generation
+	secretKey, err := rand.Int(rand.Reader, new(big.Int).Exp(big.NewInt(2), big.NewInt(254), nil))
+	if err != nil {
+		// Fallback to deterministic key if random fails (should never happen)
+		log.Warn().Err(err).Msg("Failed to generate random key, using deterministic fallback")
+		secretKey = new(big.Int).SetBytes([]byte("obscura-bridge-default-key-v1"))
+	}
+
 	return &CrossLink{
-		supportedChains: []string{"ethereum", "solana", "arbitrum", "optimism"},
-		secretKey:       big.NewInt(123456789), // Mock secret key for proof generation
+		supportedChains: []string{"ethereum", "solana", "arbitrum", "optimism", "base", "polygon"},
+		secretKey:       secretKey,
+	}
+}
+
+// NewCrossLinkWithKey initializes the bridge module with a provided key (for testing)
+func NewCrossLinkWithKey(key *big.Int) *CrossLink {
+	return &CrossLink{
+		supportedChains: []string{"ethereum", "solana", "arbitrum", "optimism", "base", "polygon"},
+		secretKey:       key,
 	}
 }
 

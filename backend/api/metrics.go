@@ -220,17 +220,17 @@ func NewMetricsServer(collector *MetricsCollector, feedManager *oracle.FeedManag
 }
 
 func (ms *MetricsServer) setupRoutes() {
-	ms.router.HandleFunc("/health", ms.healthHandler).Methods("GET")
-	ms.router.HandleFunc("/metrics", ms.metricsHandler).Methods("GET")
-	ms.router.HandleFunc("/api/stats", ms.metricsHandler).Methods("GET") // Alias for SDK
-	ms.router.HandleFunc("/api/feeds", ms.feedsHandler).Methods("GET")
-	ms.router.HandleFunc("/api/jobs", ms.jobsHandler).Methods("GET")
-	ms.router.HandleFunc("/api/proposals", ms.proposalsHandler).Methods("GET")
-	ms.router.HandleFunc("/api/network", ms.networkHandler).Methods("GET")
-	ms.router.HandleFunc("/api/chains", ms.chainsHandler).Methods("GET")
-	ms.router.HandleFunc("/metrics/prometheus", ms.prometheusHandler).Methods("GET")
+	ms.router.HandleFunc("/health", ms.healthHandler).Methods("GET", "OPTIONS")
+	ms.router.HandleFunc("/metrics", ms.metricsHandler).Methods("GET", "OPTIONS")
+	ms.router.HandleFunc("/api/stats", ms.metricsHandler).Methods("GET", "OPTIONS")
+	ms.router.HandleFunc("/api/feeds", ms.feedsHandler).Methods("GET", "OPTIONS")
+	ms.router.HandleFunc("/api/jobs", ms.jobsHandler).Methods("GET", "OPTIONS")
+	ms.router.HandleFunc("/api/proposals", ms.proposalsHandler).Methods("GET", "OPTIONS")
+	ms.router.HandleFunc("/api/network", ms.networkHandler).Methods("GET", "OPTIONS")
+	ms.router.HandleFunc("/api/chains", ms.chainsHandler).Methods("GET", "OPTIONS")
+	ms.router.HandleFunc("/metrics/prometheus", ms.prometheusHandler).Methods("GET", "OPTIONS")
 	
-	// Add CORS middleware
+	// Add CORS middleware (handles preflight requests)
 	ms.router.Use(ms.corsMiddleware)
 }
 

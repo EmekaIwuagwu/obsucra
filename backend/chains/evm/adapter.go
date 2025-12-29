@@ -602,10 +602,70 @@ func (a *EVMAdapter) SubscribeVRFRequests(ctx context.Context, callback chains.V
 	return nil
 }
 
-// DeployContracts deploys contracts to the chain
+// DeployContracts deploys a contract to the chain
 func (a *EVMAdapter) DeployContracts(ctx context.Context, bytecode []byte, constructorArgs []interface{}) (string, error) {
-	// Implementation for contract deployment
-	return "", fmt.Errorf("not implemented")
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	if !a.connected {
+		return "", fmt.Errorf("not connected to %s", a.config.Name)
+	}
+
+	// Get nonce
+	nonce, err := a.client.PendingNonceAt(ctx, a.fromAddress)
+	if err != nil {
+		return "", fmt.Errorf("failed to get nonce: %w", err)
+	}
+
+	// Get gas price
+	gasPrice, err := a.gasPricer.GetGasPrice(ctx, a.client)
+	if err != nil {
+		return "", fmt.Errorf("failed to get gas price: %w", err)
+	}
+
+	// Create deployment transaction
+	tx := types.NewContractCreation(
+		nonce,
+		big.NewInt(0), // No ETH value
+		3000000,       // Gas limit for deployment
+		gasPrice,
+		bytecode,
+	)
+
+	// Sign transaction
+	signedTx, err := types.SignTx(tx, types.LatestSignerForChainID(big.NewInt(int64(a.config.ChainID))), a.privateKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to sign transaction: %w", err)
+	}
+
+	// Send transaction
+	err = a.client.SendTransaction(ctx, signedTx)
+	if err != nil {
+		return "", fmt.Errorf("failed to send transaction: %w", err)
+	}
+
+	log.Info().
+		Str("chain", a.config.Name).
+		Str("txHash", signedTx.Hash().Hex()).
+		Msg("Contract deployment transaction sent")
+
+	// Wait for receipt
+	receipt, err := bind.WaitMined(ctx, a.client, signedTx)
+	if err != nil {
+		return "", fmt.Errorf("failed to wait for confirmation: %w", err)
+	}
+
+	if receipt.Status != 1 {
+		return "", fmt.Errorf("contract deployment failed: tx reverted")
+	}
+
+	contractAddress := receipt.ContractAddress.Hex()
+	log.Info().
+		Str("chain", a.config.Name).
+		Str("address", contractAddress).
+		Msg("Contract deployed successfully")
+
+	return contractAddress, nil
 }
 
 // GasPricer handles gas pricing strategies
